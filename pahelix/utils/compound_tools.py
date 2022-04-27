@@ -493,6 +493,71 @@ class Compound3DKit(object):
             bond_angles = np.array(bond_angles, 'float32')
         return super_edges, bond_angles, bond_angle_dirs
 
+    @staticmethod
+    def get_supersuperedge_dihedral(superedges, edges, atom_poses, dir_type='HT'):
+        """get supersuperedge dihedral"""
+        def _get_dihedral(a, b, c, d):
+            v_ba = a - b
+            v_bc = c - b
+            nabc = np.cross(v_ba, v_bc)
+
+            v_cb = b - c
+            v_cd = d - c
+            nbcd = np.cross(v_cb, v_cd)
+
+            t = np.sqrt(np.dot(nabc, nabc) * np.dot(nbcd, nbcd))
+            if t == 0:
+                return 0
+
+            temp = np.dot(nabc, nbcd) / t
+            temp = 1 if temp > 1 else temp
+            temp = -1 if temp < -1 else temp
+            theta = np.arccos(temp)
+            return theta
+
+        E = len(superedges)
+        superedge_indices = np.arange(E)
+        supersuper_edges = []
+
+        dihedral_angles = []
+        # bond_angle_dirs = []
+        for tar_superedge_i in range(E):
+            tar_superedge = superedges[tar_superedge_i]
+            if dir_type == 'HT':
+                src_superedge_indices = superedge_indices[superedges[:, 1] == tar_superedge[0]]
+            elif dir_type == 'HH':
+                src_superedge_indices = superedge_indices[superedges[:, 1] == tar_superedge[1]]
+            else:
+                raise ValueError(dir_type)
+            for src_superedge_i in src_superedge_indices:
+                if src_superedge_i == tar_superedge_i:
+                    continue
+
+                src_superedge = superedges[src_superedge_i]
+
+                src_edge_pair = [edges[src_superedge[0]], edges[src_superedge[1]]]
+                tar_edge_pair = [edges[tar_superedge[0]], edges[tar_superedge[1]]]
+
+                if (src_edge_pair[1] != tar_edge_pair[0]).any():
+                    continue
+
+                supersuper_edges.append([src_superedge_i, tar_superedge_i])
+                a = atom_poses[src_edge_pair[0][0]]
+                b = atom_poses[src_edge_pair[0][1]]
+                c = atom_poses[tar_edge_pair[1][0]]
+                d = atom_poses[tar_edge_pair[1][1]]
+                dihedral = _get_dihedral(a, b, c, d)
+                dihedral_angles.append(dihedral)
+                # bond_angle_dirs.append(src_superedge[1] == tar_edge[0])  # H -> H or H -> T
+
+        if len(supersuper_edges) == 0:
+            super_edges = np.zeros([0, 2], 'int64')
+            dihedral_angles = np.zeros([0,], 'float32')
+        else:
+            super_edges = np.array(supersuper_edges, 'int64')
+            dihedral_angles = np.array(dihedral_angles, 'float32')
+        return super_edges, dihedral_angles
+
 
 
 def new_smiles_to_graph_data(smiles, **kwargs):
@@ -665,6 +730,11 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type):
             Compound3DKit.get_superedge_angles(data['edges'], data['atom_pos'])
     data['BondAngleGraph_edges'] = BondAngleGraph_edges
     data['bond_angle'] = np.array(bond_angles, 'float32')
+
+    AngleDihedralGraph_edges, dihedral_angles = \
+        Compound3DKit.get_supersuperedge_dihedral(BondAngleGraph_edges, data["edges"], data["atom_pos"])
+    data['AngleDihedralGraph_edges'] = AngleDihedralGraph_edges
+    data['dihedral_angle'] = np.array(dihedral_angles, 'float32')
     return data
 
 
