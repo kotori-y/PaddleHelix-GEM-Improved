@@ -22,12 +22,13 @@ import numpy as np
 import networkx as nx
 from copy import deepcopy
 import pgl
-from rdkit.Chem import AllChem
+import rdkit
+from rdkit.Chem import AllChem as Chem
 
 from sklearn.metrics import pairwise_distances
 import hashlib
-from pahelix.utils.compound_tools import mol_to_geognn_graph_data_MMFF3d 
-from pahelix.utils.compound_tools import Compound3DKit 
+from pahelix.utils.compound_tools import mol_to_geognn_graph_data_MMFF3d, mol_to_geognn_graph_data_raw3d
+from pahelix.utils.compound_tools import Compound3DKit
 
 
 def md5_hash(string):
@@ -169,9 +170,10 @@ def get_pretrain_bond_angle(edges, atom_poses):
 
 class GeoPredTransformFn(object):
     """Gen features for downstream model"""
-    def __init__(self, pretrain_tasks, mask_ratio):
+    def __init__(self, pretrain_tasks, mask_ratio, with_provided_3d):
         self.pretrain_tasks = pretrain_tasks
         self.mask_ratio = mask_ratio
+        self.with_provided_3d = with_provided_3d
 
     def prepare_pretrain_task(self, data):
         """
@@ -205,9 +207,20 @@ class GeoPredTransformFn(object):
         Returns:
             data: It contains reshape label and smiles.
         """
+        if self.with_provided_3d:
+            mol = raw_data
+            if mol is None:
+                return None
+            smiles = Chem.MolToSmiles(mol)
+            print('smiles', smiles)
+            data = mol_to_geognn_graph_data_raw3d(mol)
+            data['smiles'] = smiles
+            data = self.prepare_pretrain_task(data)
+            return data
+
         smiles = raw_data
         print('smiles', smiles)
-        mol = AllChem.MolFromSmiles(smiles)
+        mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return None
         data = mol_to_geognn_graph_data_MMFF3d(mol)

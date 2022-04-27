@@ -35,6 +35,8 @@ from pahelix.featurizers.gem_featurizer import GeoPredTransformFn, GeoPredCollat
 from pahelix.model_zoo.gem_model import GeoGNNModel, GeoPredModel
 from src.utils import exempt_parameters
 
+from rdkit.Chem import AllChem as Chem
+
 
 def train(args, model, optimizer, data_gen):
     """tbd"""
@@ -96,6 +98,8 @@ def get_steps_per_epoch(args):
     # add as argument
     if args.dataset == 'zinc':
         train_num = int(20000000 * (1 - args.test_ratio))
+    elif args.dataset == '3dExample':
+        train_num = int(2 * (1 - args.test_ratio))
     else:
         raise ValueError(args.dataset)
     if args.DEBUG:
@@ -114,6 +118,17 @@ def load_smiles_to_dataset(data_path):
         with open(file, 'r') as f:
             tmp_data_list = [line.strip() for line in f.readlines()]
         data_list.extend(tmp_data_list)
+    dataset = InMemoryDataset(data_list=data_list)
+    return dataset
+
+
+def load_3dmol_to_dataset(data_path):
+    """tbd"""
+    files = sorted(glob('%s/*' % data_path))
+    data_list = []
+    for file in files:
+        mols = Chem.SDMolSupplier(file)
+        data_list.extend([mol for mol in mols])
     dataset = InMemoryDataset(data_list=data_list)
     return dataset
 
@@ -140,7 +155,11 @@ def main(args):
         print('Load state_dict from %s' % args.init_model)
     
     # get dataset
-    dataset = load_smiles_to_dataset(args.data_path)
+    if args.with_provided_3d:
+        dataset = load_3dmol_to_dataset(args.data_path)
+    else:
+        dataset = load_smiles_to_dataset(args.data_path)
+
     if args.DEBUG:
         dataset = dataset[100:180]
     dataset = dataset[dist.get_rank()::dist.get_world_size()]
@@ -191,6 +210,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--DEBUG", action='store_true', default=False)
     parser.add_argument("--distributed", action='store_true', default=False)
+    parser.add_argument("--with_provided_3d", action='store_true', default=False)
 
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--num_workers", type=int, default=4)
