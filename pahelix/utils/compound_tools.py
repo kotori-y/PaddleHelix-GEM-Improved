@@ -449,8 +449,8 @@ class Compound3DKit(object):
     @staticmethod
     def get_superedge_angles(edges, atom_poses, dir_type='HT'):
         """get superedge angles"""
-        def _get_vec(atom_poses, edge):
-            return atom_poses[edge[1]] - atom_poses[edge[0]]
+        # def _get_vec(atom_poses, edge):
+        #     return atom_poses[edge[0]] - atom_poses[edge[1]]
         def _get_angle(vec1, vec2):
             norm1 = np.linalg.norm(vec1)
             norm2 = np.linalg.norm(vec2)
@@ -478,10 +478,13 @@ class Compound3DKit(object):
                 if src_edge_i == tar_edge_i:
                     continue
                 src_edge = edges[src_edge_i]
-                src_vec = _get_vec(atom_poses, src_edge)
-                tar_vec = _get_vec(atom_poses, tar_edge)
+                # src_vec = _get_vec(atom_poses, src_edge)
+                # tar_vec = _get_vec(atom_poses, tar_edge)
                 super_edges.append([src_edge_i, tar_edge_i])
-                angle = _get_angle(src_vec, tar_vec)
+                angle = _get_angle(
+                    atom_poses[src_edge[0]] - atom_poses[src_edge[1]],
+                    atom_poses[tar_edge[1]] - atom_poses[tar_edge[0]]
+                )
                 bond_angles.append(angle)
                 bond_angle_dirs.append(src_edge[1] == tar_edge[0])  # H -> H or H -> T
 
