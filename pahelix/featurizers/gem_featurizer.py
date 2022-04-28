@@ -109,63 +109,23 @@ def mask_context_of_geognn_graph(
     return [g, superedge_g, target_atom_indices, target_labels]
     
 
-def get_pretrain_bond_angle(edges, atom_poses):
+def get_pretrain_bond_angle(superedges, edges, angles):
     """tbd"""
-    def _get_angle(vec1, vec2):
-        norm1 = np.linalg.norm(vec1)
-        norm2 = np.linalg.norm(vec2)
-        if norm1 == 0 or norm2 == 0:
-            return 0
-        vec1 = vec1 / (norm1 + 1e-5)    # 1e-5: prevent numerical errors
-        vec2 = vec2 / (norm2 + 1e-5)
-        angle = np.arccos(np.dot(vec1, vec2))
-        return angle
-    def _add_item(
-            node_i_indices, node_j_indices, node_k_indices, bond_angles, 
-            node_i_index, node_j_index, node_k_index):
-        node_i_indices += [node_i_index, node_k_index]
-        node_j_indices += [node_j_index, node_j_index]
-        node_k_indices += [node_k_index, node_i_index]
-        pos_i = atom_poses[node_i_index]
-        pos_j = atom_poses[node_j_index]
-        pos_k = atom_poses[node_k_index]
-        angle = _get_angle(pos_i - pos_j, pos_k - pos_j)
-        bond_angles += [angle, angle]
-
-    E = len(edges)
-    node_i_indices = []
-    node_j_indices = []
-    node_k_indices = []
+    atoms = []
     bond_angles = []
-    for edge_i in range(E - 1):
-        for edge_j in range(edge_i + 1, E):
-            a0, a1 = edges[edge_i]
-            b0, b1 = edges[edge_j]
-            if a0 == b0 and a1 == b1:
-                continue
-            if a0 == b1 and a1 == b0:
-                continue
-            if a0 == b0:
-                _add_item(
-                        node_i_indices, node_j_indices, node_k_indices, bond_angles,
-                        a1, a0, b1)
-            if a0 == b1:
-                _add_item(
-                        node_i_indices, node_j_indices, node_k_indices, bond_angles,
-                        a1, a0, b0)
-            if a1 == b0:
-                _add_item(
-                        node_i_indices, node_j_indices, node_k_indices, bond_angles,
-                        a0, a1, b1)
-            if a1 == b1:
-                _add_item(
-                        node_i_indices, node_j_indices, node_k_indices, bond_angles,
-                        a0, a1, b0)
-    node_ijk = np.array([node_i_indices, node_j_indices, node_k_indices])
-    uniq_node_ijk, uniq_index = np.unique(node_ijk, return_index=True, axis=1)
-    node_i_indices, node_j_indices, node_k_indices = uniq_node_ijk
-    bond_angles = np.array(bond_angles)[uniq_index]
-    return [node_i_indices, node_j_indices, node_k_indices, bond_angles]
+    for index, superedge in enumerate(superedges):
+        edge_a = edges[superedge[0]]
+        edge_b = edges[superedge[1]]
+        temp = np.hstack([edge_a, edge_b[1:]])
+
+        if temp[0] != temp[-1]:
+            atoms.append(temp)
+            bond_angles.append(angles[index])
+
+    _atoms = np.array(atoms)
+    node_i_indices, node_j_indices, node_k_indices = _atoms.T
+
+    return node_i_indices, node_j_indices, node_k_indices, bond_angles
 
 
 class GeoPredTransformFn(object):
@@ -180,7 +140,7 @@ class GeoPredTransformFn(object):
         prepare data for pretrain task
         """
         node_i, node_j, node_k, bond_angles = \
-                get_pretrain_bond_angle(data['edges'], data['atom_pos'])
+            get_pretrain_bond_angle(data['BondAngleGraph_edges'], data['edges'], data['bond_angle'])
         data['Ba_node_i'] = node_i
         data['Ba_node_j'] = node_j
         data['Ba_node_k'] = node_k
