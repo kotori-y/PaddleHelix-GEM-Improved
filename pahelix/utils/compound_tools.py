@@ -554,12 +554,12 @@ class Compound3DKit(object):
                 # bond_angle_dirs.append(src_superedge[1] == tar_edge[0])  # H -> H or H -> T
 
         if len(supersuper_edges) == 0:
-            super_edges = np.zeros([0, 2], 'int64')
+            supersuper_edges = np.zeros([0, 2], 'int64')
             dihedral_angles = np.zeros([0,], 'float32')
         else:
-            super_edges = np.array(supersuper_edges, 'int64')
+            supersuper_edges = np.array(supersuper_edges, 'int64')
             dihedral_angles = np.array(dihedral_angles, 'float32')
-        return super_edges, dihedral_angles
+        return supersuper_edges, dihedral_angles
 
 
 
