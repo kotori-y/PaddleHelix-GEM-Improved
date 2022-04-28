@@ -128,6 +128,28 @@ def get_pretrain_bond_angle(superedges, edges, angles):
     return node_i_indices, node_j_indices, node_k_indices, bond_angles
 
 
+def get_pretrain_angle_dihedral(supersuperedges, superedges, edges, angles):
+    """tbd"""
+    atoms = []
+    dihedral_angles = []
+    for index, supersuperedge in enumerate(supersuperedges):
+        superedge_a = superedges[supersuperedge[0]]
+        superedge_b = superedges[supersuperedge[1]]
+        temp = np.hstack([superedge_a, superedge_b[1:]])
+
+        if temp[0] != temp[-1]:
+            edge_a = edges[superedge_a[0]]
+            edge_d = edges[superedge_b[1]]
+            if edge_a.std() == 0 or edge_d.std() == 0:
+                continue
+            atoms.append(np.hstack([edge_a, edge_d]))
+            dihedral_angles.append(angles[index])
+
+    _atoms = np.array(atoms)
+    node_a_indices, node_b_indices, node_c_indices, node_d_indices = _atoms.T
+    return [node_a_indices, node_b_indices, node_c_indices, node_d_indices, dihedral_angles]
+
+
 class GeoPredTransformFn(object):
     """Gen features for downstream model"""
     def __init__(self, pretrain_tasks, mask_ratio, with_provided_3d):
@@ -139,6 +161,16 @@ class GeoPredTransformFn(object):
         """
         prepare data for pretrain task
         """
+        node_a, node_b, node_c, node_d, dihedral_angles = \
+            get_pretrain_angle_dihedral(
+                data["AngleDihedralGraph_edges"], data['BondAngleGraph_edges'],
+                data['edges'], data['dihedral_angle'])
+        data['Adi_node_a'] = node_a
+        data['Adi_node_b'] = node_b
+        data['Adi_node_c'] = node_c
+        data['Adi_node_d'] = node_d
+        data['Adi_angle_dihedral'] = dihedral_angles
+
         node_i, node_j, node_k, bond_angles = \
             get_pretrain_bond_angle(data['BondAngleGraph_edges'], data['edges'], data['bond_angle'])
         data['Ba_node_i'] = node_i
