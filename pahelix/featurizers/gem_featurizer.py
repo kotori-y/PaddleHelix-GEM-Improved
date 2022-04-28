@@ -224,16 +224,18 @@ class GeoPredTransformFn(object):
 class GeoPredCollateFn(object):
     """tbd"""
     def __init__(self,
-             atom_names,
-             bond_names, 
-             bond_float_names,
-             bond_angle_float_names,
-             pretrain_tasks, 
-             mask_ratio, 
-             Cm_vocab):
+                 atom_names,
+                 bond_names,
+                 bond_float_names,
+                 bond_angle_float_names,
+                 dihedral_angle_float_names,
+                 pretrain_tasks,
+                 mask_ratio,
+                 Cm_vocab):
         self.atom_names = atom_names
         self.bond_names = bond_names
         self.bond_float_names = bond_float_names
+        self.dihedral_angle_float_names = dihedral_angle_float_names
         self.pretrain_tasks = pretrain_tasks
         self.mask_ratio = mask_ratio
         self.Cm_vocab = Cm_vocab
@@ -248,6 +250,7 @@ class GeoPredCollateFn(object):
         """tbd"""
         atom_bond_graph_list = []
         bond_angle_graph_list = []
+        angle_dihedral_list = []
         masked_atom_bond_graph_list = []
         masked_bond_angle_graph_list = []
         Cm_node_i = []
@@ -270,14 +273,22 @@ class GeoPredCollateFn(object):
         for data in batch_data_list:
             N = len(data[self.atom_names[0]])
             E = len(data['edges'])
+            A = len(data['BondAngleGraph_edges'])
             ab_g = pgl.graph.Graph(num_nodes=N,
-                    edges = data['edges'],
-                    node_feat={name: data[name].reshape([-1, 1]) for name in self.atom_names},
-                    edge_feat={name: data[name].reshape([-1, 1]) for name in self.bond_names + self.bond_float_names})
+                                   edges=data['edges'],
+                                   node_feat={name: data[name].reshape([-1, 1]) for name in self.atom_names},
+                                   edge_feat={name: data[name].reshape([-1, 1]) for name in
+                                              self.bond_names + self.bond_float_names})
             ba_g = pgl.graph.Graph(num_nodes=E,
-                    edges=data['BondAngleGraph_edges'],
-                    node_feat={},
-                    edge_feat={name: data[name].reshape([-1, 1]) for name in self.bond_angle_float_names})
+                                   edges=data['BondAngleGraph_edges'],
+                                   node_feat={},
+                                   edge_feat={name: data[name].reshape([-1, 1]) for name in
+                                              self.bond_angle_float_names})
+            adi_g = pgl.graph.Graph(num_nodes=A,
+                                    edges=data['AngleDihedralGraph_edges'],
+                                    node_feat={},
+                                    edge_feat={name: data[name].reshape([-1, 1]) for name in
+                                               self.dihedral_angle_float_names})
             masked_ab_g, masked_ba_g, mask_node_i, context_id = mask_context_of_geognn_graph(
                     ab_g, ba_g, mask_ratio=self.mask_ratio, subgraph_num=self.Cm_vocab)
             atom_bond_graph_list.append(ab_g)

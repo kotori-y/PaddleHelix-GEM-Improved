@@ -176,13 +176,14 @@ def main(args):
     print("Train/Test num: %s/%s" % (len(train_dataset), len(test_dataset)))
 
     collate_fn = GeoPredCollateFn(
-            atom_names=compound_encoder_config['atom_names'],
-            bond_names=compound_encoder_config['bond_names'], 
-            bond_float_names=compound_encoder_config['bond_float_names'],
-            bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
-            pretrain_tasks=model_config['pretrain_tasks'],
-            mask_ratio=model_config['mask_ratio'],
-            Cm_vocab=model_config['Cm_vocab'])
+        atom_names=compound_encoder_config['atom_names'],
+        bond_names=compound_encoder_config['bond_names'],
+        bond_float_names=compound_encoder_config['bond_float_names'],
+        bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
+        dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names'],
+        pretrain_tasks=model_config['pretrain_tasks'],
+        mask_ratio=model_config['mask_ratio'],
+        Cm_vocab=model_config['Cm_vocab'])
     train_data_gen = train_dataset.get_data_loader(
             batch_size=args.batch_size, 
             num_workers=args.num_workers, 

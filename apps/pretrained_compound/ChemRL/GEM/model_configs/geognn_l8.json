@@ -5,7 +5,7 @@
     "bond_names": ["bond_dir", "bond_type", "is_in_ring"],
     "bond_float_names": ["bond_length"],
     "bond_angle_float_names": ["bond_angle"],
-
+    "dihedral_angle_float_names": ["dihedral_angle"],
     "embed_dim": 32,
     "dropout_rate": 0.5,
     "layer_num": 8,
