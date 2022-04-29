@@ -40,9 +40,10 @@ def md5_hash(string):
 def mask_context_of_geognn_graph(
         g, 
         superedge_g,
-        target_atom_indices=None, 
-        mask_ratio=None, 
-        mask_value=0, 
+        supersuperedge_g,
+        target_atom_indices=None,
+        mask_ratio=None,
+        mask_value=0,
         subgraph_num=None,
         version='gem'):
     """tbd"""
@@ -106,8 +107,20 @@ def mask_context_of_geognn_graph(
     masked_superedge_indices = np.concatenate(masked_superedge_indices, 0)
     for name in superedge_g.edge_feat:
         superedge_g.edge_feat[name][masked_superedge_indices] = mask_value
-    return [g, superedge_g, target_atom_indices, target_labels]
-    
+
+    # mask supersuperedge_g
+    full_supersuperedge_indices = np.arange(supersuperedge_g.num_edges)
+    masked_supersuperedge_indices = []
+    for superedge_index in masked_superedge_indices:
+        left_indices = full_supersuperedge_indices[supersuperedge_g.edges[:, 0] == superedge_index]
+        right_indices = full_supersuperedge_indices[supersuperedge_g.edges[:, 1] == superedge_index]
+        masked_supersuperedge_indices.append(np.append(left_indices, right_indices))
+    masked_supersuperedge_indices = np.concatenate(masked_supersuperedge_indices, 0)
+    for name in supersuperedge_g.edge_feat:
+        supersuperedge_g.edge_feat[name][masked_supersuperedge_indices] = mask_value
+
+    return [g, superedge_g, supersuperedge_g, target_atom_indices, target_labels]
+
 
 def get_pretrain_bond_angle(superedges, edges, angles):
     """tbd"""
@@ -253,6 +266,7 @@ class GeoPredCollateFn(object):
         angle_dihedral_list = []
         masked_atom_bond_graph_list = []
         masked_bond_angle_graph_list = []
+        masked_angle_dihedral_list = []
         Cm_node_i = []
         Cm_context_id = []
         Fg_morgan = []
@@ -289,12 +303,14 @@ class GeoPredCollateFn(object):
                                     node_feat={},
                                     edge_feat={name: data[name].reshape([-1, 1]) for name in
                                                self.dihedral_angle_float_names})
-            masked_ab_g, masked_ba_g, mask_node_i, context_id = mask_context_of_geognn_graph(
-                    ab_g, ba_g, mask_ratio=self.mask_ratio, subgraph_num=self.Cm_vocab)
+            masked_ab_g, masked_ba_g, masked_adi_g, mask_node_i, context_id = mask_context_of_geognn_graph(
+                ab_g, ba_g, adi_g, mask_ratio=self.mask_ratio, subgraph_num=self.Cm_vocab)
             atom_bond_graph_list.append(ab_g)
             bond_angle_graph_list.append(ba_g)
+            angle_dihedral_list.append(adi_g)
             masked_atom_bond_graph_list.append(masked_ab_g)
             masked_bond_angle_graph_list.append(masked_ba_g)
+            masked_angle_dihedral_list.append(masked_adi_g)
             if 'Cm' in self.pretrain_tasks:
                 Cm_node_i.append(mask_node_i + node_count)
                 Cm_context_id.append(context_id)
