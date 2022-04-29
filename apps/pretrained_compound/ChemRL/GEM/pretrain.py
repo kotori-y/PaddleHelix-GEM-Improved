@@ -163,11 +163,13 @@ def main(args):
     if args.DEBUG:
         dataset = dataset[100:180]
     dataset = dataset[dist.get_rank()::dist.get_world_size()]
-    smiles_lens = [len(smiles) for smiles in dataset]
     print('Total size:%s' % (len(dataset)))
-    print('Dataset smiles min/max/avg length: %s/%s/%s' % (
-            np.min(smiles_lens), np.max(smiles_lens), np.mean(smiles_lens)))
-    transform_fn = GeoPredTransformFn(model_config['pretrain_tasks'], model_config['mask_ratio'])
+    if not args.with_provided_3d:
+        smiles_lens = [len(smiles) for smiles in dataset]
+        print('Dataset smiles min/max/avg length: %s/%s/%s' % (
+                np.min(smiles_lens), np.max(smiles_lens), np.mean(smiles_lens)))
+    transform_fn = GeoPredTransformFn(model_config['pretrain_tasks'], model_config['mask_ratio'],
+                                      args.with_provided_3d)
     # this step will be time consuming due to rdkit 3d calculation
     dataset.transform(transform_fn, num_workers=args.num_workers)
     test_index = int(len(dataset) * (1 - args.test_ratio))
