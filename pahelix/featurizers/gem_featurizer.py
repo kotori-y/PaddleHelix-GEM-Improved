@@ -140,6 +140,14 @@ def get_pretrain_bond_angle(superedges, edges, angles):
             bond_angles.append(angles[index])
 
     _atoms = np.array(atoms)
+
+    if len(_atoms) == 0:
+        node_i_indices = np.zeros([0, ], 'int64')
+        node_j_indices = np.zeros([0, ], 'int64')
+        node_k_indices = np.zeros([0, ], 'int64')
+        bond_angles = np.zeros([0, ], 'float32')
+        return [node_i_indices, node_j_indices, node_k_indices, bond_angles]
+
     node_i_indices, node_j_indices, node_k_indices = _atoms.T
 
     return node_i_indices, node_j_indices, node_k_indices, bond_angles
@@ -163,6 +171,15 @@ def get_pretrain_angle_dihedral(supersuperedges, superedges, edges, angles):
             dihedral_angles.append(angles[index])
 
     _atoms = np.array(atoms)
+
+    if len(_atoms) == 0:
+        node_a_indices = np.zeros([0, ], 'int64')
+        node_b_indices = np.zeros([0, ], 'int64')
+        node_c_indices = np.zeros([0, ], 'int64')
+        node_d_indices = np.zeros([0, ], 'int64')
+        dihedral_angles = np.zeros([0, ], 'float32')
+        return [node_a_indices, node_b_indices, node_c_indices, node_d_indices, dihedral_angles]
+
     node_a_indices, node_b_indices, node_c_indices, node_d_indices = _atoms.T
     return [node_a_indices, node_b_indices, node_c_indices, node_d_indices, dihedral_angles]
 
