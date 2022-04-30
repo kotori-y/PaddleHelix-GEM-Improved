@@ -38,7 +38,7 @@ def md5_hash(string):
 
 
 def mask_context_of_geognn_graph(
-        g, 
+        g,
         superedge_g,
         supersuperedge_g,
         target_atom_indices=None,
@@ -82,12 +82,12 @@ def mask_context_of_geognn_graph(
             target_label = subgraph_id
         else:
             raise ValueError(version)
-        
+
         target_labels.append(target_label)
         Cm_node_i.append([atom_index])
         Cm_node_i.append(nei_atom_indices)
         masked_bond_indices.append(nei_bond_indices)
-    
+
     target_atom_indices = np.array(target_atom_indices)
     target_labels = np.array(target_labels)
     Cm_node_i = np.concatenate(Cm_node_i, 0)
@@ -274,7 +274,7 @@ class GeoPredCollateFn(object):
         self.mask_ratio = mask_ratio
         self.Cm_vocab = Cm_vocab
         self.bond_angle_float_names = bond_angle_float_names
-        
+
     def _flat_shapes(self, d):
         """TODO: reshape due to pgl limitations on the shape"""
         for name in d:
@@ -284,10 +284,10 @@ class GeoPredCollateFn(object):
         """tbd"""
         atom_bond_graph_list = []
         bond_angle_graph_list = []
-        angle_dihedral_list = []
+        angle_dihedral_graph_list = []
         masked_atom_bond_graph_list = []
         masked_bond_angle_graph_list = []
-        masked_angle_dihedral_list = []
+        masked_angle_dihedral_graph_list = []
         Cm_node_i = []
         Cm_context_id = []
         Fg_morgan = []
@@ -297,6 +297,11 @@ class GeoPredCollateFn(object):
         Ba_node_j = []
         Ba_node_k = []
         Ba_bond_angle = []
+        Adi_node_a = []
+        Adi_node_b = []
+        Adi_node_c = []
+        Adi_node_d = []
+        Adi_angle_dihedral = []
         Bl_node_i = []
         Bl_node_j = []
         Bl_bond_length = []
@@ -328,10 +333,10 @@ class GeoPredCollateFn(object):
                 ab_g, ba_g, adi_g, mask_ratio=self.mask_ratio, subgraph_num=self.Cm_vocab)
             atom_bond_graph_list.append(ab_g)
             bond_angle_graph_list.append(ba_g)
-            angle_dihedral_list.append(adi_g)
+            angle_dihedral_graph_list.append(adi_g)
             masked_atom_bond_graph_list.append(masked_ab_g)
             masked_bond_angle_graph_list.append(masked_ba_g)
-            masked_angle_dihedral_list.append(masked_adi_g)
+            masked_angle_dihedral_graph_list.append(masked_adi_g)
             if 'Cm' in self.pretrain_tasks:
                 Cm_node_i.append(mask_node_i + node_count)
                 Cm_context_id.append(context_id)
@@ -344,6 +349,12 @@ class GeoPredCollateFn(object):
                 Ba_node_j.append(data['Ba_node_j'] + node_count)
                 Ba_node_k.append(data['Ba_node_k'] + node_count)
                 Ba_bond_angle.append(data['Ba_bond_angle'])
+            if 'Dir' in self.pretrain_tasks:
+                Adi_node_a.append(data['Adi_node_a'] + node_count)
+                Adi_node_b.append(data['Adi_node_b'] + node_count)
+                Adi_node_c.append(data['Adi_node_c'] + node_count)
+                Adi_node_d.append(data['Adi_node_d'] + node_count)
+                Adi_angle_dihedral.append(data['Adi_angle_dihedral']),
             if 'Blr' in self.pretrain_tasks:
                 Bl_node_i.append(data['Bl_node_i'] + node_count)
                 Bl_node_j.append(data['Bl_node_j'] + node_count)
@@ -355,9 +366,9 @@ class GeoPredCollateFn(object):
 
             node_count += N
 
-        graph_dict = {}    
+        graph_dict = {}
         feed_dict = {}
-        
+
         atom_bond_graph = pgl.Graph.batch(atom_bond_graph_list)
         self._flat_shapes(atom_bond_graph.node_feat)
         self._flat_shapes(atom_bond_graph.edge_feat)
@@ -368,6 +379,11 @@ class GeoPredCollateFn(object):
         self._flat_shapes(bond_angle_graph.edge_feat)
         graph_dict['bond_angle_graph'] = bond_angle_graph
 
+        angle_dihedral_graph = pgl.Graph.batch(angle_dihedral_graph_list)
+        self._flat_shapes(angle_dihedral_graph.node_feat)
+        self._flat_shapes(angle_dihedral_graph.edge_feat)
+        graph_dict['angle_dihedral_graph'] = angle_dihedral_graph
+
         masked_atom_bond_graph = pgl.Graph.batch(masked_atom_bond_graph_list)
         self._flat_shapes(masked_atom_bond_graph.node_feat)
         self._flat_shapes(masked_atom_bond_graph.edge_feat)
@@ -375,8 +391,13 @@ class GeoPredCollateFn(object):
 
         masked_bond_angle_graph = pgl.Graph.batch(masked_bond_angle_graph_list)
         self._flat_shapes(masked_bond_angle_graph.node_feat)
-        self._flat_shapes(masked_bond_angle_graph.edge_feat)         
+        self._flat_shapes(masked_bond_angle_graph.edge_feat)
         graph_dict['masked_bond_angle_graph'] = masked_bond_angle_graph
+
+        masked_angle_dihedral_graph = pgl.Graph.batch(masked_angle_dihedral_graph_list)
+        self._flat_shapes(masked_angle_dihedral_graph.node_feat)
+        self._flat_shapes(masked_angle_dihedral_graph.edge_feat)
+        graph_dict['masked_angle_dihedral_graph'] = masked_angle_dihedral_graph
 
         if 'Cm' in self.pretrain_tasks:
             feed_dict['Cm_node_i'] = np.concatenate(Cm_node_i, 0).reshape(-1).astype('int64')
@@ -390,6 +411,12 @@ class GeoPredCollateFn(object):
             feed_dict['Ba_node_j'] = np.concatenate(Ba_node_j, 0).reshape(-1).astype('int64')
             feed_dict['Ba_node_k'] = np.concatenate(Ba_node_k, 0).reshape(-1).astype('int64')
             feed_dict['Ba_bond_angle'] = np.concatenate(Ba_bond_angle, 0).reshape(-1, 1).astype('float32')
+        if 'Dir' in self.pretrain_tasks:
+            feed_dict['Adi_node_a'] = np.concatenate(Adi_node_a, 0).reshape(-1).astype('int64')
+            feed_dict['Adi_node_b'] = np.concatenate(Adi_node_b, 0).reshape(-1).astype('int64')
+            feed_dict['Adi_node_c'] = np.concatenate(Adi_node_c, 0).reshape(-1).astype('int64')
+            feed_dict['Adi_node_d'] = np.concatenate(Adi_node_c, 0).reshape(-1).astype('int64')
+            feed_dict['Adi_angle_dihedral'] = np.concatenate(Adi_angle_dihedral, 0).reshape(-1, 1).astype('float32')
         if 'Blr' in self.pretrain_tasks:
             feed_dict['Bl_node_i'] = np.concatenate(Bl_node_i, 0).reshape(-1).astype('int64')
             feed_dict['Bl_node_j'] = np.concatenate(Bl_node_j, 0).reshape(-1).astype('int64')

@@ -32,12 +32,12 @@ class AtomEmbedding(nn.Layer):
     def __init__(self, atom_names, embed_dim):
         super(AtomEmbedding, self).__init__()
         self.atom_names = atom_names
-        
+
         self.embed_list = nn.LayerList()
         for name in self.atom_names:
             embed = nn.Embedding(
                     CompoundKit.get_atom_feature_size(name) + 5,
-                    embed_dim, 
+                    embed_dim,
                     weight_attr=nn.initializer.XavierUniform())
             self.embed_list.append(embed)
 
@@ -59,7 +59,7 @@ class AtomFloatEmbedding(nn.Layer):
     def __init__(self, atom_float_names, embed_dim, rbf_params=None):
         super(AtomFloatEmbedding, self).__init__()
         self.atom_float_names = atom_float_names
-        
+
         if rbf_params is None:
             self.rbf_params = {
                 'van_der_waals_radis': (np.arange(1, 3, 0.2), 10.0),   # (centers, gamma)
@@ -98,12 +98,12 @@ class BondEmbedding(nn.Layer):
     def __init__(self, bond_names, embed_dim):
         super(BondEmbedding, self).__init__()
         self.bond_names = bond_names
-        
+
         self.embed_list = nn.LayerList()
         for name in self.bond_names:
             embed = nn.Embedding(
                     CompoundKit.get_bond_feature_size(name) + 5,
-                    embed_dim, 
+                    embed_dim,
                     weight_attr=nn.initializer.XavierUniform())
             self.embed_list.append(embed)
 
@@ -132,7 +132,7 @@ class BondFloatRBF(nn.Layer):
             }
         else:
             self.rbf_params = rbf_params
-        
+
         self.linear_list = nn.LayerList()
         self.rbf_list = nn.LayerList()
         for name in self.bond_float_names:
@@ -169,7 +169,7 @@ class BondAngleFloatRBF(nn.Layer):
             }
         else:
             self.rbf_params = rbf_params
-        
+
         self.linear_list = nn.LayerList()
         self.rbf_list = nn.LayerList()
         for name in self.bond_angle_float_names:
@@ -187,6 +187,44 @@ class BondAngleFloatRBF(nn.Layer):
         out_embed = 0
         for i, name in enumerate(self.bond_angle_float_names):
             x = bond_angle_float_features[name]
+            rbf_x = self.rbf_list[i](x)
+            out_embed += self.linear_list[i](rbf_x)
+        return out_embed
+
+
+class DihedralAngleFloatRBF(nn.Layer):
+    """
+    Dihedral Angle Float Encoder using Radial Basis Functions
+    """
+
+    def __init__(self, dihedral_angle_float_names, embed_dim, rbf_params=None):
+        super(DihedralAngleFloatRBF, self).__init__()
+        self.dihedral_angle_float_names = dihedral_angle_float_names
+
+        if rbf_params is None:
+            self.rbf_params = {
+                'dihedral_angle': (np.arange(0, np.pi, 0.1), 10.0),  # (centers, gamma)
+            }
+        else:
+            self.rbf_params = rbf_params
+
+        self.linear_list = nn.LayerList()
+        self.rbf_list = nn.LayerList()
+        for name in self.dihedral_angle_float_names:
+            centers, gamma = self.rbf_params[name]
+            rbf = RBF(centers, gamma)
+            self.rbf_list.append(rbf)
+            linear = nn.Linear(len(centers), embed_dim)
+            self.linear_list.append(linear)
+
+    def forward(self, dihedral_angle_float_features):
+        """
+        Args:
+            dihedral_angle_float_features(dict of tensor): bond angle float features.
+        """
+        out_embed = 0
+        for i, name in enumerate(self.dihedral_angle_float_names):
+            x = dihedral_angle_float_features[name]
             rbf_x = self.rbf_list[i](x)
             out_embed += self.linear_list[i](rbf_x)
         return out_embed
