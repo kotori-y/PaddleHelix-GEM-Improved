@@ -2,7 +2,7 @@
     "hidden_size": 256,
     "act": "leaky_relu",
 
-    "pretrain_tasks": ["Cm", "Fg", "Bar", "Blr", "Adc"],
+    "pretrain_tasks": ["Cm", "Fg", "Bar", "Blr", "Adc", "Dir"],
     "Cm_vocab": 2400,
     "Bar_vocab": 30,
     "Blr_vocab": 30,
