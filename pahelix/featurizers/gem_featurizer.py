@@ -104,9 +104,11 @@ def mask_context_of_geognn_graph(
         left_indices = full_superedge_indices[superedge_g.edges[:, 0] == bond_index]
         right_indices = full_superedge_indices[superedge_g.edges[:, 1] == bond_index]
         masked_superedge_indices.append(np.append(left_indices, right_indices))
-    masked_superedge_indices = np.concatenate(masked_superedge_indices, 0)
-    for name in superedge_g.edge_feat:
-        superedge_g.edge_feat[name][masked_superedge_indices] = mask_value
+
+    if len(masked_superedge_indices) != 0:
+        masked_superedge_indices = np.concatenate(masked_superedge_indices, 0)
+        for name in superedge_g.edge_feat:
+            superedge_g.edge_feat[name][masked_superedge_indices] = mask_value
 
     # mask supersuperedge_g
     full_supersuperedge_indices = np.arange(supersuperedge_g.num_edges)
@@ -115,9 +117,11 @@ def mask_context_of_geognn_graph(
         left_indices = full_supersuperedge_indices[supersuperedge_g.edges[:, 0] == superedge_index]
         right_indices = full_supersuperedge_indices[supersuperedge_g.edges[:, 1] == superedge_index]
         masked_supersuperedge_indices.append(np.append(left_indices, right_indices))
-    masked_supersuperedge_indices = np.concatenate(masked_supersuperedge_indices, 0)
-    for name in supersuperedge_g.edge_feat:
-        supersuperedge_g.edge_feat[name][masked_supersuperedge_indices] = mask_value
+
+    if len(masked_supersuperedge_indices) != 0:
+        masked_supersuperedge_indices = np.concatenate(masked_supersuperedge_indices, 0)
+        for name in supersuperedge_g.edge_feat:
+            supersuperedge_g.edge_feat[name][masked_supersuperedge_indices] = mask_value
 
     return [g, superedge_g, supersuperedge_g, target_atom_indices, target_labels]
 
