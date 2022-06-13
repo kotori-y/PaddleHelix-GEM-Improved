@@ -157,12 +157,12 @@ class GeoGNNModel(nn.Layer):
             cur_edge_hidden = self.bond_embedding_list[layer_id](atom_bond_graph.edge_feat)
             cur_edge_hidden = cur_edge_hidden + self.bond_float_rbf_list[layer_id](atom_bond_graph.edge_feat)
 
-            cur_angle_hidden = self.bond_angle_float_rbf_list[layer_id](bond_angle_graph.edge_feat)
             edge_hidden = self.bond_angle_block_list[layer_id](
                     bond_angle_graph,
                     cur_edge_hidden,
-                    cur_angle_hidden)
+                    angle_hidden_list[layer_id])
 
+            cur_angle_hidden = self.bond_angle_float_rbf_list[layer_id](bond_angle_graph.edge_feat)
             cur_dihedral_hidden = self.dihedral_angle_float_rbf_list[layer_id](angle_dihedral_graph.edge_feat)
             angle_hidden = self.angle_dihedral_block_list[layer_id](
                     angle_dihedral_graph,
