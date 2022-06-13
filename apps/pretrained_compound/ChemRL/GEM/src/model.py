@@ -46,14 +46,14 @@ class DownstreamModel(nn.Layer):
         if self.task_type == 'class':
             self.out_act = nn.Sigmoid()
 
-    def forward(self, atom_bond_graphs, bond_angle_graphs):
+    def forward(self, atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs):
         """
         Define the forward function,set the parameter layer options.compound_encoder 
         creates a graph data holders that attributes and features in the graph.
         Returns:
             pred: the model prediction.
         """
-        node_repr, edge_repr, graph_repr = self.compound_encoder(atom_bond_graphs, bond_angle_graphs)
+        node_repr, edge_repr, graph_repr = self.compound_encoder(atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs)
         graph_repr = self.norm(graph_repr)
         pred = self.mlp(graph_repr)
         if self.task_type == 'class':

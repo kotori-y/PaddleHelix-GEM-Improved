@@ -1,5 +1,5 @@
 #!/usr/bin/python                                                                                  
-#-*-coding:utf-8-*- 
+# -*-coding:utf-8-*-
 #   Copyright (c) 2020 PaddlePaddle Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,6 +20,7 @@ GEM pretrain
 import os
 from os.path import join, exists, basename
 import sys
+import json
 import argparse
 import time
 import numpy as np
@@ -28,6 +29,7 @@ import logging
 
 import paddle
 import paddle.distributed as dist
+# import pandas as pd
 
 from pahelix.datasets.inmemory_dataset import InMemoryDataset
 from pahelix.utils import load_json_config
@@ -41,7 +43,7 @@ from rdkit.Chem import AllChem as Chem
 def train(args, model, optimizer, data_gen):
     """tbd"""
     model.train()
-    
+
     steps = get_steps_per_epoch(args)
     step = 0
     list_loss = []
@@ -61,7 +63,7 @@ def train(args, model, optimizer, data_gen):
         step += 1
         if step > steps:
             print("jumpping out")
-            break         
+            break
     return np.mean(list_loss)
 
 
@@ -70,10 +72,10 @@ def evaluate(args, model, test_dataset, collate_fn):
     """tbd"""
     model.eval()
     data_gen = test_dataset.get_data_loader(
-            batch_size=args.batch_size, 
-            num_workers=args.num_workers, 
-            shuffle=True, 
-            collate_fn=collate_fn)
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=True,
+        collate_fn=collate_fn)
 
     dict_loss = {'loss': []}
     for graph_dict, feed_dict in data_gen:
@@ -99,7 +101,7 @@ def get_steps_per_epoch(args):
     if args.dataset == 'zinc':
         train_num = int(20000000 * (1 - args.test_ratio))
     elif args.dataset == '3dExample':
-        train_num = int(2 * (1 - args.test_ratio))
+        train_num = int(1000 * (1 - args.test_ratio))
     else:
         raise ValueError(args.dataset)
     if args.DEBUG:
@@ -153,25 +155,31 @@ def main(args):
     if not args.init_model is None and not args.init_model == "":
         compound_encoder.set_state_dict(paddle.load(args.init_model))
         print('Load state_dict from %s' % args.init_model)
-    
-    # get dataset
-    if args.with_provided_3d:
-        dataset = load_3dmol_to_dataset(args.data_path)
-    else:
-        dataset = load_smiles_to_dataset(args.data_path)
 
-    if args.DEBUG:
-        dataset = dataset[100:180]
-    dataset = dataset[dist.get_rank()::dist.get_world_size()]
-    print('Total size:%s' % (len(dataset)))
-    if not args.with_provided_3d:
-        smiles_lens = [len(smiles) for smiles in dataset]
-        print('Dataset smiles min/max/avg length: %s/%s/%s' % (
+    if os.path.exists(args.cached_data_path):
+        print('Read preprocessing data...')
+        dataset = InMemoryDataset(npz_data_path=args.cached_data_path)
+    else:
+        # get dataset
+        if args.with_provided_3d:
+            dataset = load_3dmol_to_dataset(args.data_path)
+        else:
+            dataset = load_smiles_to_dataset(args.data_path)
+
+        if args.DEBUG:
+            dataset = dataset[100:180]
+        dataset = dataset[dist.get_rank()::dist.get_world_size()]
+        print('Total size:%s' % (len(dataset)))
+        if not args.with_provided_3d:
+            smiles_lens = [len(smiles) for smiles in dataset]
+            print('Dataset smiles min/max/avg length: %s/%s/%s' % (
                 np.min(smiles_lens), np.max(smiles_lens), np.mean(smiles_lens)))
-    transform_fn = GeoPredTransformFn(model_config['pretrain_tasks'], model_config['mask_ratio'],
-                                      args.with_provided_3d)
-    # this step will be time consuming due to rdkit 3d calculation
-    dataset.transform(transform_fn, num_workers=args.num_workers)
+        transform_fn = GeoPredTransformFn(model_config['pretrain_tasks'], model_config['mask_ratio'],
+                                          args.with_provided_3d)
+        # this step will be time consuming due to rdkit 3d calculation
+        dataset.transform(transform_fn, num_workers=args.num_workers)
+        dataset.save_data(args.cached_data_path)
+
     test_index = int(len(dataset) * (1 - args.test_ratio))
     train_dataset = dataset[:test_index]
     test_dataset = dataset[test_index:]
@@ -187,24 +195,31 @@ def main(args):
         mask_ratio=model_config['mask_ratio'],
         Cm_vocab=model_config['Cm_vocab'])
     train_data_gen = train_dataset.get_data_loader(
-            batch_size=args.batch_size, 
-            num_workers=args.num_workers, 
-            shuffle=True, 
-            collate_fn=collate_fn)
-    
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=True,
+        collate_fn=collate_fn)
+
     list_test_loss = []
+
+    history = []
+
     for epoch_id in range(args.max_epoch):
         s = time.time()
         train_loss = train(args, model, opt, train_data_gen)
         test_loss = evaluate(args, model, test_dataset, collate_fn)
         if not args.distributed or dist.get_rank() == 0:
-            paddle.save(compound_encoder.state_dict(), 
-                '%s/epoch%d.pdparams' % (args.model_dir, epoch_id))
+            paddle.save(compound_encoder.state_dict(),
+                        '%s/epoch%d.pdparams' % (args.model_dir, epoch_id))
             list_test_loss.append(test_loss['loss'])
             print("epoch:%d train/loss:%s" % (epoch_id, train_loss))
             print("epoch:%d test/loss:%s" % (epoch_id, test_loss))
             print("Time used:%ss" % (time.time() - s))
-    
+
+            info = {**{"train": train_loss}, **test_loss}
+            history.append(info)
+            # pd.DataFrame(history).T.to_csv("/mnt/e/webWork/listening-ml/public/geognn_advenced.csv", header=False)
+
     if not args.distributed or dist.get_rank() == 0:
         print('Best epoch id:%s' % np.argmin(list_test_loss))
 
@@ -214,6 +229,7 @@ if __name__ == '__main__':
     parser.add_argument("--DEBUG", action='store_true', default=False)
     parser.add_argument("--distributed", action='store_true', default=False)
     parser.add_argument("--with_provided_3d", action='store_true', default=False)
+    parser.add_argument("--cached_data_path", type=str, default=None)
 
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--num_workers", type=int, default=4)

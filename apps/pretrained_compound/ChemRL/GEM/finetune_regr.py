@@ -55,14 +55,16 @@ def train(
             collate_fn=collate_fn)
     list_loss = []
     model.train()
-    for atom_bond_graphs, bond_angle_graphs, labels in data_gen:
+    for atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs, labels in data_gen:
         if len(labels) < args.batch_size * 0.5:
             continue
         atom_bond_graphs = atom_bond_graphs.tensor()
         bond_angle_graphs = bond_angle_graphs.tensor()
+        angle_dihedral_graphs = angle_dihedral_graphs.tensor()
+
         scaled_labels = (labels - label_mean) / (label_std + 1e-5)
         scaled_labels = paddle.to_tensor(scaled_labels, 'float32')
-        preds = model(atom_bond_graphs, bond_angle_graphs)
+        preds = model(atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs)
         loss = criterion(preds, scaled_labels)
         loss.backward()
         encoder_opt.step()
@@ -90,11 +92,12 @@ def evaluate(
     total_pred = []
     total_label = []
     model.eval()
-    for atom_bond_graphs, bond_angle_graphs, labels in data_gen:
+    for atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs, labels in data_gen:
         atom_bond_graphs = atom_bond_graphs.tensor()
         bond_angle_graphs = bond_angle_graphs.tensor()
+        angle_dihedral_graphs = angle_dihedral_graphs.tensor()
         labels = paddle.to_tensor(labels, 'float32')
-        scaled_preds = model(atom_bond_graphs, bond_angle_graphs)
+        scaled_preds = model(atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs)
         preds = scaled_preds.numpy() * label_std + label_mean
         total_pred.append(preds)
         total_label.append(labels.numpy())
@@ -206,6 +209,7 @@ def main(args):
             bond_names=compound_encoder_config['bond_names'],
             bond_float_names=compound_encoder_config['bond_float_names'],
             bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
+            dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names'],
             task_type=task_type)
     for epoch_id in range(args.max_epoch):
         train_loss = train(

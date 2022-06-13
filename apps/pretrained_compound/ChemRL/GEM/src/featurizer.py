@@ -57,12 +57,14 @@ class DownstreamCollateFn(object):
             bond_names, 
             bond_float_names,
             bond_angle_float_names,
+            dihedral_angle_float_names,
             task_type,
             is_inference=False):
         self.atom_names = atom_names
         self.bond_names = bond_names
         self.bond_float_names = bond_float_names
         self.bond_angle_float_names = bond_angle_float_names
+        self.dihedral_angle_float_names = dihedral_angle_float_names
         self.task_type = task_type
         self.is_inference = is_inference
 
@@ -85,6 +87,8 @@ class DownstreamCollateFn(object):
         """
         atom_bond_graph_list = []
         bond_angle_graph_list = []
+        angle_dihedral_graph_list = []
+
         label_list = []
         for data in data_list:
             ab_g = pgl.Graph(
@@ -97,18 +101,30 @@ class DownstreamCollateFn(object):
                     edges=data['BondAngleGraph_edges'],
                     node_feat={},
                     edge_feat={name: data[name].reshape([-1, 1]) for name in self.bond_angle_float_names})
+            adi_g = pgl.graph.Graph(
+                    num_nodes=len(data['BondAngleGraph_edges']),
+                    edges=data['AngleDihedralGraph_edges'],
+                    node_feat={},
+                    edge_feat={name: data[name].reshape([-1, 1]) for name in self.dihedral_angle_float_names})
+
             atom_bond_graph_list.append(ab_g)
             bond_angle_graph_list.append(ba_g)
+            angle_dihedral_graph_list.append(adi_g)
+
             if not self.is_inference:
                 label_list.append(data['label'])
 
         atom_bond_graph = pgl.Graph.batch(atom_bond_graph_list)
         bond_angle_graph = pgl.Graph.batch(bond_angle_graph_list)
+        angle_dihedral_graph = pgl.Graph.batch(angle_dihedral_graph_list)
+
         # TODO: reshape due to pgl limitations on the shape
         self._flat_shapes(atom_bond_graph.node_feat)
         self._flat_shapes(atom_bond_graph.edge_feat)
         self._flat_shapes(bond_angle_graph.node_feat)
         self._flat_shapes(bond_angle_graph.edge_feat)
+        self._flat_shapes(angle_dihedral_graph.node_feat)
+        self._flat_shapes(angle_dihedral_graph.edge_feat)
 
         if not self.is_inference:
             if self.task_type == 'class':
@@ -116,10 +132,10 @@ class DownstreamCollateFn(object):
                 # label: -1 -> 0, 1 -> 1
                 labels = ((labels + 1.0) / 2)
                 valids = (labels != 0.5)
-                return [atom_bond_graph, bond_angle_graph, valids, labels]
+                return [atom_bond_graph, bond_angle_graph, angle_dihedral_graph, valids, labels]
             else:
                 labels = np.array(label_list, 'float32')
-                return atom_bond_graph, bond_angle_graph, labels
+                return atom_bond_graph, bond_angle_graph, angle_dihedral_graph, labels
         else:
-            return atom_bond_graph, bond_angle_graph
+            return atom_bond_graph, bond_angle_graph, angle_dihedral_graph
 

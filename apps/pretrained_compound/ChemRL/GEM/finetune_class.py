@@ -51,14 +51,16 @@ def train(args, model, train_dataset, collate_fn, criterion, encoder_opt, head_o
             collate_fn=collate_fn)
     list_loss = []
     model.train()
-    for atom_bond_graphs, bond_angle_graphs, valids, labels in data_gen:
+    for atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs, valids, labels in data_gen:
         if len(labels) < args.batch_size * 0.5:
             continue
         atom_bond_graphs = atom_bond_graphs.tensor()
         bond_angle_graphs = bond_angle_graphs.tensor()
+        angle_dihedral_graphs = angle_dihedral_graphs.tensor()
+
         labels = paddle.to_tensor(labels, 'float32')
         valids = paddle.to_tensor(valids, 'float32')
-        preds = model(atom_bond_graphs, bond_angle_graphs)
+        preds = model(atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs)
         loss = criterion(preds, labels)
         loss = paddle.sum(loss * valids) / paddle.sum(valids)
         loss.backward()
@@ -85,12 +87,13 @@ def evaluate(args, model, test_dataset, collate_fn):
     total_label = []
     total_valid = []
     model.eval()
-    for atom_bond_graphs, bond_angle_graphs, valids, labels in data_gen:
+    for atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs, valids, labels in data_gen:
         atom_bond_graphs = atom_bond_graphs.tensor()
         bond_angle_graphs = bond_angle_graphs.tensor()
+        angle_dihedral_graphs = angle_dihedral_graphs.tensor()
         labels = paddle.to_tensor(labels, 'float32')
         valids = paddle.to_tensor(valids, 'float32')
-        preds = model(atom_bond_graphs, bond_angle_graphs)
+        preds = model(atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs)
         total_pred.append(preds.numpy())
         total_valid.append(valids.numpy())
         total_label.append(labels.numpy())
@@ -191,6 +194,7 @@ def main(args):
             bond_names=compound_encoder_config['bond_names'],
             bond_float_names=compound_encoder_config['bond_float_names'],
             bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
+            dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names'],
             task_type='class')
     for epoch_id in range(args.max_epoch):
         train_loss = train(args, model, train_dataset, collate_fn, criterion, encoder_opt, head_opt)
