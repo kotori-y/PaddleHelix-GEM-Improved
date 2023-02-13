@@ -717,7 +717,7 @@ def mol_to_graph_data(mol):
     return data
 
 
-def mol_to_geognn_graph_data(mol, atom_poses, dir_type):
+def mol_to_geognn_graph_data(mol, atom_poses, dir_type, only_atom_bond=False):
     """
     mol: rdkit molecule
     dir_type: direction type for bond_angle grpah
@@ -729,15 +729,18 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type):
 
     data['atom_pos'] = np.array(atom_poses, 'float32')
     data['bond_length'] = Compound3DKit.get_bond_lengths(data['edges'], data['atom_pos'])
-    BondAngleGraph_edges, bond_angles, bond_angle_dirs = \
-            Compound3DKit.get_superedge_angles(data['edges'], data['atom_pos'])
-    data['BondAngleGraph_edges'] = BondAngleGraph_edges
-    data['bond_angle'] = np.array(bond_angles, 'float32')
 
-    AngleDihedralGraph_edges, dihedral_angles = \
-        Compound3DKit.get_supersuperedge_dihedral(BondAngleGraph_edges, data["edges"], data["atom_pos"])
-    data['AngleDihedralGraph_edges'] = AngleDihedralGraph_edges
-    data['dihedral_angle'] = np.array(dihedral_angles, 'float32')
+    if not only_atom_bond:
+        BondAngleGraph_edges, bond_angles, bond_angle_dirs = \
+                Compound3DKit.get_superedge_angles(data['edges'], data['atom_pos'])
+        data['BondAngleGraph_edges'] = BondAngleGraph_edges
+        data['bond_angle'] = np.array(bond_angles, 'float32')
+
+        AngleDihedralGraph_edges, dihedral_angles = \
+            Compound3DKit.get_supersuperedge_dihedral(BondAngleGraph_edges, data["edges"], data["atom_pos"])
+        data['AngleDihedralGraph_edges'] = AngleDihedralGraph_edges
+        data['dihedral_angle'] = np.array(dihedral_angles, 'float32')
+
     return data
 
 

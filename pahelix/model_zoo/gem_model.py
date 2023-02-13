@@ -23,7 +23,7 @@ from pgl.nn import GraphPool
 
 from pahelix.networks.gnn_block import GIN
 from pahelix.networks.compound_encoder import AtomEmbedding, BondEmbedding, \
-        BondFloatRBF, BondAngleFloatRBF, DihedralAngleFloatRBF
+    BondFloatRBF, BondAngleFloatRBF, DihedralAngleFloatRBF
 from pahelix.utils.compound_tools import CompoundKit
 from pahelix.networks.gnn_block import MeanPool, GraphNorm
 from pahelix.networks.basic_block import MLP
@@ -33,6 +33,7 @@ class GeoGNNBlock(nn.Layer):
     """
     GeoGNN Block
     """
+
     def __init__(self, embed_dim, dropout_rate, last_act):
         super(GeoGNNBlock, self).__init__()
 
@@ -45,7 +46,7 @@ class GeoGNNBlock(nn.Layer):
         if last_act:
             self.act = nn.ReLU()
         self.dropout = nn.Dropout(p=dropout_rate)
-    
+
     def forward(self, graph, node_hidden, edge_hidden):
         """tbd"""
         out = self.gnn(graph, node_hidden, edge_hidden)
@@ -65,6 +66,7 @@ class GeoGNNModel(nn.Layer):
     Args:
         model_config(dict): a dict of model configurations.
     """
+
     def __init__(self, model_config={}):
         super(GeoGNNModel, self).__init__()
 
@@ -83,7 +85,7 @@ class GeoGNNModel(nn.Layer):
         self.init_bond_embedding = BondEmbedding(self.bond_names, self.embed_dim)
         self.init_bond_float_rbf = BondFloatRBF(self.bond_float_names, self.embed_dim)
         self.init_bond_angle_float_rbf = BondAngleFloatRBF(self.bond_angle_float_names, self.embed_dim)
-        
+
         self.bond_embedding_list = nn.LayerList()
         self.bond_float_rbf_list = nn.LayerList()
         self.bond_angle_float_rbf_list = nn.LayerList()
@@ -95,19 +97,19 @@ class GeoGNNModel(nn.Layer):
 
         for layer_id in range(self.layer_num):
             self.bond_embedding_list.append(
-                    BondEmbedding(self.bond_names, self.embed_dim))
+                BondEmbedding(self.bond_names, self.embed_dim))
             self.bond_float_rbf_list.append(
-                    BondFloatRBF(self.bond_float_names, self.embed_dim))
+                BondFloatRBF(self.bond_float_names, self.embed_dim))
             self.bond_angle_float_rbf_list.append(
-                    BondAngleFloatRBF(self.bond_angle_float_names, self.embed_dim))
+                BondAngleFloatRBF(self.bond_angle_float_names, self.embed_dim))
             self.dihedral_angle_float_rbf_list.append(
-                    DihedralAngleFloatRBF(self.dihedral_angle_float_names, self.embed_dim))
+                DihedralAngleFloatRBF(self.dihedral_angle_float_names, self.embed_dim))
             self.atom_bond_block_list.append(
-                    GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1)))
+                GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1)))
             self.bond_angle_block_list.append(
-                    GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1)))
+                GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1)))
             self.angle_dihedral_block_list.append(
-                    GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1)))
+                GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1)))
 
         # TODO: use self-implemented MeanPool due to pgl bug.
         if self.readout == 'mean':
@@ -134,7 +136,7 @@ class GeoGNNModel(nn.Layer):
         """the out dim of graph_repr"""
         return self.embed_dim
 
-    def forward(self, atom_bond_graph, bond_angle_graph, angle_dihedral_graph):
+    def forward(self, atom_bond_graph, bond_angle_graph, angle_dihedral_graph, z=0):
         """
         Build the network.
         """
@@ -148,64 +150,65 @@ class GeoGNNModel(nn.Layer):
         angle_hidden_list = [angle_hidden]
 
         for layer_id in range(self.layer_num):
-
             node_hidden = self.atom_bond_block_list[layer_id](
-                    atom_bond_graph,
-                    node_hidden_list[layer_id],
-                    edge_hidden_list[layer_id])
-            
+                atom_bond_graph,
+                node_hidden_list[layer_id] + z,
+                edge_hidden_list[layer_id])
+
             cur_edge_hidden = self.bond_embedding_list[layer_id](atom_bond_graph.edge_feat)
             cur_edge_hidden = cur_edge_hidden + self.bond_float_rbf_list[layer_id](atom_bond_graph.edge_feat)
 
             edge_hidden = self.bond_angle_block_list[layer_id](
-                    bond_angle_graph,
-                    cur_edge_hidden,
-                    angle_hidden_list[layer_id])
+                bond_angle_graph,
+                cur_edge_hidden,
+                angle_hidden_list[layer_id])
 
             cur_angle_hidden = self.bond_angle_float_rbf_list[layer_id](bond_angle_graph.edge_feat)
             cur_dihedral_hidden = self.dihedral_angle_float_rbf_list[layer_id](angle_dihedral_graph.edge_feat)
             angle_hidden = self.angle_dihedral_block_list[layer_id](
-                    angle_dihedral_graph,
-                    cur_angle_hidden,
-                    cur_dihedral_hidden)
+                angle_dihedral_graph,
+                cur_angle_hidden,
+                cur_dihedral_hidden)
 
             node_hidden_list.append(node_hidden)
             edge_hidden_list.append(edge_hidden)
             angle_hidden_list.append(angle_hidden)
-        
+
         node_repr = node_hidden_list[-1]
         edge_repr = edge_hidden_list[-1]
         graph_repr = self.graph_pool(atom_bond_graph, node_repr)
-        return node_repr, edge_repr, graph_repr
+
+        return node_repr, edge_repr, graph_repr, node_hidden_list
 
 
 class GeoPredModel(nn.Layer):
     """tbd"""
+
     def __init__(self, model_config, compound_encoder):
         super(GeoPredModel, self).__init__()
         self.compound_encoder = compound_encoder
-        
+
         self.hidden_size = model_config['hidden_size']
         self.dropout_rate = model_config['dropout_rate']
         self.act = model_config['act']
         self.pretrain_tasks = model_config['pretrain_tasks']
-        
+
         # context mask
         if 'Cm' in self.pretrain_tasks:
             self.Cm_vocab = model_config['Cm_vocab']
             self.Cm_linear = nn.Linear(compound_encoder.embed_dim, self.Cm_vocab + 3)
             self.Cm_loss = nn.CrossEntropyLoss()
-        # functinal group
-        self.Fg_linear = nn.Linear(compound_encoder.embed_dim, model_config['Fg_size']) # 494
+        # functional group
+        self.Fg_linear = nn.Linear(compound_encoder.embed_dim, model_config['Fg_size'])  # 494
         self.Fg_loss = nn.BCEWithLogitsLoss()
         # bond angle with regression
         if 'Bar' in self.pretrain_tasks:
             self.Bar_mlp = MLP(2,
-                    hidden_size=self.hidden_size,
-                    act=self.act,
-                    in_size=compound_encoder.embed_dim * 3,
-                    out_size=1,
-                    dropout_rate=self.dropout_rate)
+                               hidden_size=self.hidden_size,
+                               act=self.act,
+                               in_size=compound_encoder.embed_dim * 3,
+                               out_size=1,
+                               dropout_rate=self.dropout_rate)
             self.Bar_loss = nn.SmoothL1Loss()
         # dihedral angle with regression
         if 'Dir' in self.pretrain_tasks:
@@ -219,21 +222,21 @@ class GeoPredModel(nn.Layer):
         # bond length with regression
         if 'Blr' in self.pretrain_tasks:
             self.Blr_mlp = MLP(2,
-                    hidden_size=self.hidden_size,
-                    act=self.act,
-                    in_size=compound_encoder.embed_dim * 2,
-                    out_size=1,
-                    dropout_rate=self.dropout_rate)
+                               hidden_size=self.hidden_size,
+                               act=self.act,
+                               in_size=compound_encoder.embed_dim * 2,
+                               out_size=1,
+                               dropout_rate=self.dropout_rate)
             self.Blr_loss = nn.SmoothL1Loss()
         # atom distance with classification
         if 'Adc' in self.pretrain_tasks:
             self.Adc_vocab = model_config['Adc_vocab']
             self.Adc_mlp = MLP(2,
-                    hidden_size=self.hidden_size,
-                    in_size=self.compound_encoder.embed_dim * 2,
-                    act=self.act,
-                    out_size=self.Adc_vocab + 3,
-                    dropout_rate=self.dropout_rate)
+                               hidden_size=self.hidden_size,
+                               in_size=self.compound_encoder.embed_dim * 2,
+                               act=self.act,
+                               out_size=self.Adc_vocab + 3,
+                               dropout_rate=self.dropout_rate)
             self.Adc_loss = nn.CrossEntropyLoss()
 
         print('[GeoPredModel] pretrain_tasks:%s' % str(self.pretrain_tasks))
@@ -246,9 +249,9 @@ class GeoPredModel(nn.Layer):
 
     def _get_Fg_loss(self, feed_dict, graph_repr):
         fg_label = paddle.concat(
-                [feed_dict['Fg_morgan'], 
-                feed_dict['Fg_daylight'], 
-                feed_dict['Fg_maccs']], 1)
+            [feed_dict['Fg_morgan'],
+             feed_dict['Fg_daylight'],
+             feed_dict['Fg_maccs']], 1)
         logits = self.Fg_linear(graph_repr)
         loss = self.Fg_loss(logits, fg_label)
         return loss
@@ -295,10 +298,10 @@ class GeoPredModel(nn.Layer):
         Build the network.
         """
         node_repr, edge_repr, graph_repr = self.compound_encoder.forward(
-                graph_dict['atom_bond_graph'], graph_dict['bond_angle_graph'], graph_dict['angle_dihedral_graph'])
+            graph_dict['atom_bond_graph'], graph_dict['bond_angle_graph'], graph_dict['angle_dihedral_graph'])
         masked_node_repr, masked_edge_repr, masked_graph_repr = self.compound_encoder.forward(
-                graph_dict['masked_atom_bond_graph'], graph_dict['masked_bond_angle_graph'],
-                graph_dict['masked_angle_dihedral_graph'])
+            graph_dict['masked_atom_bond_graph'], graph_dict['masked_bond_angle_graph'],
+            graph_dict['masked_angle_dihedral_graph'])
 
         sub_losses = {}
         if 'Cm' in self.pretrain_tasks:
@@ -327,3 +330,79 @@ class GeoPredModel(nn.Layer):
             return loss, sub_losses
         else:
             return loss
+
+
+class GNNModel(nn.Layer):
+    """
+    The GeoGNN Model used in GEM.
+
+    Args:
+        model_config(dict): a dict of model configurations.
+    """
+
+    def __init__(self, model_config={}):
+        super(GNNModel, self).__init__()
+
+        self.embed_dim = model_config.get('embed_dim', 32)
+        self.dropout_rate = model_config.get('dropout_rate', 0.2)
+        self.layer_num = model_config.get('layer_num', 8)
+        self.readout = model_config.get('readout', 'mean')
+
+        self.atom_names = model_config['atom_names']
+        self.bond_names = model_config['bond_names']
+        self.bond_float_names = model_config['bond_float_names']
+
+        self.init_atom_embedding = AtomEmbedding(self.atom_names, self.embed_dim)
+
+        self.bond_embedding_list = nn.LayerList()
+        self.bond_float_rbf_list = nn.LayerList()
+
+        self.atom_bond_block_list = nn.LayerList()
+
+        for layer_id in range(self.layer_num):
+
+            self.bond_embedding_list.append(
+                BondEmbedding(self.bond_names, self.embed_dim))
+            self.bond_float_rbf_list.append(
+                BondFloatRBF(self.bond_float_names, self.embed_dim))
+
+            self.atom_bond_block_list.append(
+                GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1)))
+
+        # TODO: use self-implemented MeanPool due to pgl bug.
+        if self.readout == 'mean':
+            self.graph_pool = MeanPool()
+        else:
+            self.graph_pool = pgl.nn.GraphPool(pool_type=self.readout)
+
+
+    @property
+    def node_dim(self):
+        """the out dim of graph_repr"""
+        return self.embed_dim
+
+    @property
+    def graph_dim(self):
+        """the out dim of graph_repr"""
+        return self.embed_dim
+
+    def forward(self, atom_bond_graph):
+        """
+        Build the network.
+        """
+        node_hidden = self.init_atom_embedding(atom_bond_graph.node_feat)
+        node_hidden_list = []
+
+        for layer_id in range(self.layer_num):
+            edge_hidden = self.bond_embedding_list[layer_id](atom_bond_graph.edge_feat)
+            edge_hidden += self.bond_float_rbf_list[layer_id](atom_bond_graph.edge_feat)
+
+            node_hidden = self.atom_bond_block_list[layer_id](
+                atom_bond_graph,
+                node_hidden,
+                edge_hidden)
+            node_hidden_list.append(node_hidden)
+
+        graph_hidden = self.graph_pool(atom_bond_graph, node_hidden)
+
+        return node_hidden, edge_hidden, graph_hidden, node_hidden_list

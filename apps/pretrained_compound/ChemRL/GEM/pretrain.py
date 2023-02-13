@@ -145,6 +145,7 @@ def main(args):
 
     compound_encoder = GeoGNNModel(compound_encoder_config)
     model = GeoPredModel(model_config, compound_encoder)
+
     if args.distributed:
         model = paddle.DataParallel(model)
     opt = paddle.optimizer.Adam(learning_rate=args.lr, parameters=model.parameters())
@@ -194,6 +195,7 @@ def main(args):
         pretrain_tasks=model_config['pretrain_tasks'],
         mask_ratio=model_config['mask_ratio'],
         Cm_vocab=model_config['Cm_vocab'])
+
     train_data_gen = train_dataset.get_data_loader(
         batch_size=args.batch_size,
         num_workers=args.num_workers,
