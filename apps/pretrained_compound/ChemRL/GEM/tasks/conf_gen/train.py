@@ -26,7 +26,7 @@ def get_steps_per_epoch(train_num, args):
     return steps_per_epoch
 
 
-def train(args, model, encoder_opt, decoder_opt, head_opt, train_data_gen, train_num):
+def train(args, model, opt, train_data_gen, train_num):
     model.train()
 
     steps = get_steps_per_epoch(train_num, args)
@@ -47,13 +47,12 @@ def train(args, model, encoder_opt, decoder_opt, head_opt, train_data_gen, train
         loss, loss_dict = compute_loss(extra_output, pos_list, gt_pos_list, batch, args)
 
         loss.backward()
-        encoder_opt.step()
-        decoder_opt.step()
-        head_opt.step()
+        opt.step()
 
-        encoder_opt.clear_grad()
-        decoder_opt.clear_grad()
-        head_opt.clear_grad()
+        # encoder_opt.clear_grad()
+        # decoder_opt.clear_grad()
+        # head_opt.clear_grad()
+        opt.clear_grad()
 
         for k, v in loss_dict.items():
             loss_accum_dict[k] += v
@@ -129,15 +128,17 @@ def main(args):
     decoder_model = GeoGNNModel(compound_encoder_config)
     model = ConfGenModel(model_config, compound_encoder_config, prior_model, encoder_model, decoder_model)
 
-    prior_params = prior_model.parameters()
-    encoder_params = encoder_model.parameters()
-    decoder_params = decoder_model.parameters()
-    head_params = exempt_parameters(model.parameters(), prior_params + encoder_params + decoder_params)
+    # prior_params = prior_model.parameters()
+    # encoder_params = encoder_model.parameters()
+    # decoder_params = decoder_model.parameters()
+    # head_params = exempt_parameters(model.parameters(), prior_params + encoder_params + decoder_params)
+    #
+    # encoder_opt = paddle.optimizer.Adam(args.encoder_lr, parameters=encoder_params + prior_params)
+    # decoder_opt = paddle.optimizer.Adam(args.encoder_lr, parameters=decoder_params)
+    # head_opt = paddle.optimizer.Adam(args.head_lr, parameters=head_params)
 
-    encoder_opt = paddle.optimizer.Adam(args.encoder_lr, parameters=encoder_params + prior_params)
-    decoder_opt = paddle.optimizer.Adam(args.encoder_lr, parameters=decoder_params)
-    head_opt = paddle.optimizer.Adam(args.head_lr, parameters=head_params)
-
+    model_params = model.parameters()
+    optimizer = paddle.optimizer.Adam(args.encoder_lr, parameters=model_params)
     print('Total param num: %s' % (len(model.parameters())))
 
     if args.distributed:
@@ -193,7 +194,8 @@ def main(args):
         if not args.distributed or dist.get_rank() == 0:
             print("\n=====Epoch {}".format(epoch))
             print("Training...")
-        loss_dict = train(args, model, encoder_opt, decoder_opt, head_opt, train_data_gen, train_num)
+        # loss_dict = train(args, model, encoder_opt, decoder_opt, head_opt, train_data_gen, train_num)
+        loss_dict = train(args, model, optimizer, train_data_gen, train_num)
 
         if not args.distributed or dist.get_rank() == 0:
             train_history.append(loss_dict)
@@ -205,6 +207,10 @@ def main(args):
             test_rmsd = evaluate(args, model, test_data_gen, test_num)
             print(f"valid rmsd: {valid_rmsd}, test rmsd: {test_rmsd}")
 
+            # paddle.save(compound_encoder.state_dict(),
+            #             '%s/epoch%d/compound_encoder.pdparams' % (args.model_dir, epoch_id))
+            # paddle.save(model.state_dict(),
+            #             '%s/epoch%d/model.pdparams' % (args.model_dir, epoch_id))
             paddle.save(model.state_dict(), '%s/epoch%d.pdparams' % (args.model_dir, epoch))
 
 

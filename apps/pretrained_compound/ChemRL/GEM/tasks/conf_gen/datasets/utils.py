@@ -27,26 +27,22 @@ def load_sdf_mol_to_dataset(data_path: str):
 class ConfGenTaskTransformFn:
     """Gen features for downstream model"""
 
-    def __init__(self, is_inference=False, use_self_pos=True, pos=None):
-        assert use_self_pos or (not use_self_pos and pos)
-
+    def __init__(self, is_inference=False):
         self.is_inference = is_inference
-        self.use_self_pos = use_self_pos
-
-        self.pos = pos
 
     def __call__(self, mol):
         _gt_pos = mol.GetConformer().GetPositions()
-        noise = np.random.uniform(-1, 1, size=_gt_pos.shape)
+        # noise = np.random.uniform(-1, 1, size=_gt_pos.shape)
+        noise = 0
         gt_pos = _gt_pos + noise
 
-        # prior_pos = np.random.uniform(-1, 1, gt_pos.shape)
-        prior_pos = gt_pos
+        prior_pos = np.random.uniform(-1, 1, gt_pos.shape)
+        # prior_pos = gt_pos
 
-        if self.use_self_pos:
+        if not self.is_inference:
             data = mol_to_geognn_graph_data_raw3d(mol)
         else:
-            data = mol_to_geognn_graph_data(mol, self.pos, dir_type='HT', only_atom_bond=True)
+            data = None
 
         prior_data = mol_to_geognn_graph_data(mol, prior_pos, dir_type='HT', only_atom_bond=True)
 
@@ -80,13 +76,16 @@ class ConfGenTaskCollateFn(object):
                 edges=prior_data['edges'],
                 node_feat={name: prior_data[name].reshape([-1, 1]) for name in self.atom_names},
                 edge_feat={name: prior_data[name].reshape([-1, 1]) for name in self.bond_names + self.bond_float_names})
-            ab_g = pgl.Graph(
-                num_nodes=len(data[self.atom_names[0]]),
-                edges=data['edges'],
-                node_feat={name: data[name].reshape([-1, 1]) for name in self.atom_names},
-                edge_feat={name: data[name].reshape([-1, 1]) for name in self.bond_names + self.bond_float_names})
 
-            batch_list.extend([i] * ab_g.num_nodes)
+            ab_g = None
+            if data is not None:
+                ab_g = pgl.Graph(
+                    num_nodes=len(data[self.atom_names[0]]),
+                    edges=data['edges'],
+                    node_feat={name: data[name].reshape([-1, 1]) for name in self.atom_names},
+                    edge_feat={name: data[name].reshape([-1, 1]) for name in self.bond_names + self.bond_float_names})
+
+            batch_list.extend([i] * prior_ab_g.num_nodes)
             mol_list.append(mol)
             num_nodes.append(len(mol.GetAtoms()))
 
@@ -101,14 +100,18 @@ class ConfGenTaskCollateFn(object):
         batch = dict(zip(["batch", "num_nodes", "mols"], [batch_list, num_nodes, mol_list]))
 
         prior_atom_bond_graph = pgl.Graph.batch(prior_atom_bond_graph_list)
-        atom_bond_graph = pgl.Graph.batch(atom_bond_graph_list)
+        if atom_bond_graph_list[0] is not None:
+            atom_bond_graph = pgl.Graph.batch(atom_bond_graph_list)
+        else:
+            atom_bond_graph = None
 
         # TODO: reshape due to pgl limitations on the shape
         self._flat_shapes(prior_atom_bond_graph.node_feat)
         self._flat_shapes(prior_atom_bond_graph.edge_feat)
 
-        self._flat_shapes(atom_bond_graph.node_feat)
-        self._flat_shapes(atom_bond_graph.edge_feat)
+        if atom_bond_graph is not None:
+            self._flat_shapes(atom_bond_graph.node_feat)
+            self._flat_shapes(atom_bond_graph.edge_feat)
 
         return {
             "prior_atom_bond_graphs": prior_atom_bond_graph,
