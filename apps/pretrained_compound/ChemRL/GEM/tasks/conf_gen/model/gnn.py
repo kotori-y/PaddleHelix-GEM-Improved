@@ -65,7 +65,7 @@ class ConfGenModel(nn.Layer):
 
         # prior conf
         # total_nodes = batch["num_nodes"].sum()
-        cur_pos = paddle.to_tensor(np.vstack(prior_poses))
+        cur_pos = prior_poses
         pos_list = []
 
         node_hidden, edge_hidden, graph_hidden, node_hidden_list = self.prior_gnn(prior_atom_bond_graphs)
@@ -102,7 +102,7 @@ class ConfGenModel(nn.Layer):
         n = 0
         for mol in batch["mols"]:
             n_atom = mol.GetConformer().GetPositions().shape[0]
-            tmp_pos = cur_pos[n:n_atom + n]
+            tmp_pos = cur_pos[n: n_atom + n]
             new_data.append(mol_to_geognn_graph_data(mol, atom_poses=tmp_pos, dir_type="HT"))
             n += n_atom
 
