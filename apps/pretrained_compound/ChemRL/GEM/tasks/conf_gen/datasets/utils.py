@@ -40,7 +40,7 @@ class ConfGenTaskTransformFn:
         # prior_pos = gt_pos
 
         if not self.is_inference:
-            data = mol_to_geognn_graph_data_raw3d(mol)
+            data = mol_to_geognn_graph_data(mol, gt_pos, dir_type='HT', only_atom_bond=True)
         else:
             data = None
 
