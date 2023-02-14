@@ -1,7 +1,9 @@
 import copy
+
+import numpy as np
 from rdkit.Chem.rdmolops import RemoveHs
 from rdkit.Chem import rdMolAlign as MA
-
+from rdkit.Chem.rdForceFieldHelpers import MMFFOptimizeMolecule
 
 def exempt_parameters(src_list, ref_list):
     """Remove element from src_list that is in ref_list"""
@@ -30,3 +32,18 @@ def get_best_rmsd(gen_mol, ref_mol):
     ref_mol = RemoveHs(ref_mol)
     rmsd = MA.GetBestRMS(gen_mol, ref_mol)
     return rmsd
+
+
+def get_rmsd_min(inputargs):
+    mols, use_ff, threshold = inputargs
+    gen_mols, ref_mols = mols
+    rmsd_mat = np.zeros([len(ref_mols), len(gen_mols)], dtype=np.float32)
+    for i, gen_mol in enumerate(gen_mols):
+        gen_mol_c = copy.deepcopy(gen_mol)
+        if use_ff:
+            MMFFOptimizeMolecule(gen_mol_c)
+        for j, ref_mol in enumerate(ref_mols):
+            ref_mol_c = copy.deepcopy(ref_mol)
+            rmsd_mat[j, i] = get_best_rmsd(gen_mol_c, ref_mol_c)
+    rmsd_mat_min = rmsd_mat.min(-1)
+    return (rmsd_mat_min <= threshold).mean(), rmsd_mat_min.mean()
