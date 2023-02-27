@@ -25,31 +25,42 @@ def load_sdf_mol_to_dataset(data_path: str):
 class ConfGenTaskTransformFn:
     """Gen features for downstream model"""
 
-    def __init__(self, is_inference=False):
+    def __init__(self, is_inference=False, add_noise=False, only_atom_bond=True):
         self.is_inference = is_inference
+        self.add_noise = add_noise
+        self.only_atom_bond = only_atom_bond
 
     def __call__(self, mol):
         gt_pos = mol.GetConformer().GetPositions()
-        # noise = np.random.uniform(-1, 1, size=_gt_pos.shape)
+        if self.add_noise:
+            noise = np.random.uniform(-1, 1, size=gt_pos.shape)
+            gt_pos += noise
 
         prior_pos = np.random.uniform(-1, 1, gt_pos.shape)
         # prior_pos = gt_pos
 
         if not self.is_inference:
-            data = mol_to_geognn_graph_data(mol, gt_pos - gt_pos.mean(axis=0), dir_type='HT')
+            data = mol_to_geognn_graph_data(mol, gt_pos - gt_pos.mean(axis=0), dir_type='HT', only_atom_bond=self.only_atom_bond)
         else:
             data = None
 
-        prior_data = mol_to_geognn_graph_data(mol, prior_pos, dir_type='HT')
+        prior_data = mol_to_geognn_graph_data(mol, prior_pos, dir_type='HT', only_atom_bond=self.only_atom_bond)
 
         return [prior_data, data, prior_pos, gt_pos, mol]
 
 
 class ConfGenTaskCollateFn(object):
-    def __init__(self, atom_names, bond_names, bond_float_names):
+    def __init__(self,
+                 atom_names,
+                 bond_names,
+                 bond_float_names,
+                 bond_angle_float_names,
+                 dihedral_angle_float_names):
         self.atom_names = atom_names
         self.bond_names = bond_names
         self.bond_float_names = bond_float_names
+        self.bond_angle_float_names = bond_angle_float_names
+        self.dihedral_angle_float_names = dihedral_angle_float_names
 
     def _flat_shapes(self, d):
         for name in d:
@@ -81,14 +92,13 @@ class ConfGenTaskCollateFn(object):
                 num_nodes=len(prior_data['edges']),
                 edges=prior_data['BondAngleGraph_edges'],
                 node_feat={},
-                edge_feat={name: prior_data[name].reshape([-1, 1]) for name in
-                           compound_encoder_config["bond_angle_float_names"]})
+                edge_feat={name: prior_data[name].reshape([-1, 1]) for name in self.bond_angle_float_names})
             prior_adi_g = pgl.graph.Graph(
                 num_nodes=len(prior_data['BondAngleGraph_edges']),
                 edges=prior_data['AngleDihedralGraph_edges'],
                 node_feat={},
-                edge_feat={name: prior_data[name].reshape([-1, 1]) for name in
-                           compound_encoder_config["dihedral_angle_float_names"]})
+                edge_feat={name: prior_data[name].reshape([-1, 1]) for name in self.dihedral_angle_float_names})
+
             prior_atom_bond_graph_list.append(prior_ab_g)
             prior_bond_angle_graph_list.append(prior_ba_g)
             prior_angle_dihedral_graph_list.append(prior_adi_g)
@@ -103,14 +113,12 @@ class ConfGenTaskCollateFn(object):
                     num_nodes=len(data['edges']),
                     edges=data['BondAngleGraph_edges'],
                     node_feat={},
-                    edge_feat={name: data[name].reshape([-1, 1]) for name in
-                               compound_encoder_config["bond_angle_float_names"]})
+                    edge_feat={name: data[name].reshape([-1, 1]) for name in self.bond_angle_float_names})
                 adi_g = pgl.graph.Graph(
                     num_nodes=len(data['BondAngleGraph_edges']),
                     edges=data['AngleDihedralGraph_edges'],
                     node_feat={},
-                    edge_feat={name: data[name].reshape([-1, 1]) for name in
-                               compound_encoder_config["dihedral_angle_float_names"]})
+                    edge_feat={name: data[name].reshape([-1, 1]) for name in self.dihedral_angle_float_names})
 
                 atom_bond_graph_list.append(ab_g)
                 bond_angle_graph_list.append(ba_g)
