@@ -5,6 +5,7 @@ import paddle
 import paddle.nn as nn
 import pgl
 
+from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import scatter_mean
 from pahelix.model_zoo.gem_model import GeoGNNModel, GNNModel
 from pahelix.networks.basic_block import MLP, MLPwoLastAct
 from pahelix.utils.compound_tools import mol_to_geognn_graph_data
@@ -13,25 +14,26 @@ from rdkit import Chem
 
 
 class ConfGenModel(nn.Layer):
-    def __init__(self, model_config, compound_encoder_config, recycle=0):
-
+    def __init__(self, encoder_config, decoder_config, down_config, recycle=0):
         super(ConfGenModel, self).__init__()
-
-        self.compound_encoder_config = compound_encoder_config
         assert recycle >= 0
+
+        self.encoder_config = encoder_config
+        self.decoder_config = decoder_config
+        self.down_config = down_config
 
         # prior
         self.prior_gnn = nn.LayerList()
         self.prior_pos = nn.LayerList()
         for _ in range(recycle + 1):
-            prior_encoder = GeoGNNModel(compound_encoder_config)
+            prior_encoder = GNNModel(encoder_config)
             prior_pos = MLPwoLastAct(
-                model_config['layer_num'],
+                down_config['layer_num'],
                 in_size=prior_encoder.graph_dim,
-                hidden_size=model_config['hidden_size'],
+                hidden_size=down_config['hidden_size'],
                 out_size=3,
-                act=model_config['act'],
-                dropout_rate=model_config['dropout_rate']
+                act=down_config['act'],
+                dropout_rate=down_config['dropout_rate']
             )
             self.prior_pos.append(prior_pos)
             self.prior_gnn.append(prior_encoder)
@@ -41,15 +43,15 @@ class ConfGenModel(nn.Layer):
         # encoder
         self.encoder_gnn = nn.LayerList()
         for _ in range(recycle + 1):
-            encoder = GeoGNNModel(compound_encoder_config)
+            encoder = GNNModel(encoder_config)
             self.encoder_gnn.append(encoder)
         self.encoder_head = MLPwoLastAct(
-            model_config['layer_num'],
-            in_size=compound_encoder_config['embed_dim'],
-            hidden_size=model_config['hidden_size'],
-            out_size=compound_encoder_config['embed_dim'] * 2,
-            act=model_config['act'],
-            dropout_rate=model_config['dropout_rate']
+            down_config['layer_num'],
+            in_size=encoder_config['embed_dim'],
+            hidden_size=down_config['hidden_size'],
+            out_size=encoder_config['embed_dim'] * 2,
+            act=down_config['act'],
+            dropout_rate=down_config['dropout_rate']
         )
         # encoder
 
@@ -57,24 +59,21 @@ class ConfGenModel(nn.Layer):
         self.decoder_gnn = nn.LayerList()
         self.decoder_pos = nn.LayerList()
         for _ in range(recycle + 1):
-            decoder = GeoGNNModel(compound_encoder_config)
+            decoder = GeoGNNModel(decoder_config)
             decoder_pos = MLPwoLastAct(
-                model_config['layer_num'],
+                down_config['layer_num'],
                 in_size=decoder.graph_dim,
-                hidden_size=model_config['hidden_size'],
+                hidden_size=down_config['hidden_size'],
                 out_size=3,
-                act=model_config['act'],
-                dropout_rate=model_config['dropout_rate']
+                act=down_config['act'],
+                dropout_rate=down_config['dropout_rate']
             )
             self.decoder_gnn.append(decoder)
             self.decoder_pos.append(decoder_pos)
         # self.decoder_norm = nn.LayerNorm(decoder.graph_dim)
         # decoder
 
-    def forward(self,
-                prior_atom_bond_graphs, prior_bond_angle_graph, prior_angle_dihedral_graph,
-                atom_bond_graphs, bond_angle_graph, angle_dihedral_graph,
-                prior_poses, batch, sample=False):
+    def forward(self, prior_atom_bond_graphs, atom_bond_graphs, prior_poses, batch, sample=False):
         # CCLKSILAUUULCQ-RITPCOANSA-N
         extra_output = {}
 
@@ -83,31 +82,23 @@ class ConfGenModel(nn.Layer):
         cur_pos = prior_poses
         pos_list = []
 
-        prior_node_repr, prior_edge_repr, prior_angle_repr = None, None, None
+        prior_node_repr = 0
         for i, layer in enumerate(self.prior_gnn):
-            prior_node_repr, prior_edge_repr, prior_angle_repr, prior_graph_repr = layer(
-                prior_atom_bond_graphs, prior_bond_angle_graph, prior_angle_dihedral_graph,
-                atom_residual=prior_node_repr, bond_residual=prior_edge_repr, angle_residual=prior_angle_repr
-            )
+            prior_node_repr, prior_edge_repr, prior_graph_repr = layer(prior_atom_bond_graphs, atom_residual=prior_node_repr)
             delta_pos = self.prior_pos[i](prior_node_repr)
-            cur_pos, _ = ConfGenModel.move2origin(cur_pos + delta_pos, batch["batch"])
+            cur_pos = ConfGenModel.move2origin(cur_pos + delta_pos, batch["batch"], batch["num_nodes"])
             pos_list.append(cur_pos)
             if i != len(self.prior_gnn) - 1:
-                prior_atom_bond_graphs, prior_bond_angle_graph, prior_angle_dihedral_graph = \
-                    self.update_graph(self.compound_encoder_config, batch, cur_pos)
+                prior_atom_bond_graphs = self.update_graph(self.encoder_config, batch, cur_pos, only_atom_bond=True)
         else:
             extra_output["prior_pos_list"] = pos_list
-            prior_output = [prior_node_repr, prior_edge_repr, prior_angle_repr]
         # prior encoder
 
         if not sample:
             # encoder
-            node_repr, edge_repr, angle_repr = None, None, None
+            node_repr = 0
             for i, layer in enumerate(self.encoder_gnn):
-                node_repr, edge_repr, angle_repr, graph_repr = layer(
-                    atom_bond_graphs, bond_angle_graph, angle_dihedral_graph,
-                    atom_residual=node_repr, bond_residual=edge_repr, angle_residual=angle_repr
-                )
+                node_repr, edge_repr, graph_repr = layer(atom_bond_graphs, atom_residual=node_repr)
 
             aggregated_feat = graph_repr
             latent = self.encoder_head(aggregated_feat)
@@ -124,23 +115,22 @@ class ConfGenModel(nn.Layer):
         cur_pos = pos_list[-1]
         pos_list = []
 
-        node_repr, edge_repr, angle_repr = prior_output
+        node_repr = prior_node_repr
         for i, layer in enumerate(self.decoder_gnn):
             atom_bond_graphs, bond_angle_graph, angle_dihedral_graph = \
-                ConfGenModel.update_graph(self.compound_encoder_config, batch, cur_pos, only_atom_bond=False)
+                ConfGenModel.update_graph(self.decoder_config, batch, cur_pos, only_atom_bond=False)
 
             node_repr, edge_repr, angle_repr, graph_repr = layer(
-                atom_bond_graphs, bond_angle_graph, angle_dihedral_graph,
-                atom_residual=node_repr, bond_residual=edge_repr, angle_residual=angle_repr, z=z
+                atom_bond_graphs, bond_angle_graph, angle_dihedral_graph, atom_residual=node_repr, z=z
             )
             delta_pos = self.decoder_pos[i](node_repr)
-            cur_pos, _ = ConfGenModel.move2origin(cur_pos + delta_pos, batch["batch"])
+            cur_pos = ConfGenModel.move2origin(cur_pos + delta_pos, batch["batch"], batch["num_nodes"])
             pos_list.append(cur_pos)
 
         return extra_output, pos_list
 
     @staticmethod
-    def update_graph(compound_encoder_config, batch, cur_pos, only_atom_bond=False):
+    def update_graph(model_config, batch, cur_pos, only_atom_bond=False):
         data_list = []
         prev_node = 0
         for i, mol in enumerate(batch["mols"]):
@@ -155,11 +145,11 @@ class ConfGenModel(nn.Layer):
 
         for i, data in enumerate(data_list):
             ab_g = pgl.Graph(
-                num_nodes=len(data[compound_encoder_config["atom_names"][0]]),
+                num_nodes=len(data[model_config["atom_names"][0]]),
                 edges=data['edges'],
-                node_feat={name: data[name].reshape([-1, 1]) for name in compound_encoder_config["atom_names"]},
+                node_feat={name: data[name].reshape([-1, 1]) for name in model_config["atom_names"]},
                 edge_feat={name: data[name].reshape([-1, 1]) for name in
-                           compound_encoder_config["bond_names"] + compound_encoder_config["bond_float_names"]})
+                           model_config["bond_names"] + model_config["bond_float_names"]})
             atom_bond_graph_list.append(ab_g)
 
             if not only_atom_bond:
@@ -168,13 +158,13 @@ class ConfGenModel(nn.Layer):
                     edges=data['BondAngleGraph_edges'],
                     node_feat={},
                     edge_feat={name: data[name].reshape([-1, 1]) for name in
-                               compound_encoder_config["bond_angle_float_names"]})
+                               model_config["bond_angle_float_names"]})
                 adi_g = pgl.graph.Graph(
                     num_nodes=len(data['BondAngleGraph_edges']),
                     edges=data['AngleDihedralGraph_edges'],
                     node_feat={},
                     edge_feat={name: data[name].reshape([-1, 1]) for name in
-                               compound_encoder_config["dihedral_angle_float_names"]})
+                               model_config["dihedral_angle_float_names"]})
                 bond_angle_graph_list.append(ba_g)
                 angle_dihedral_graph_list.append(adi_g)
 
@@ -201,18 +191,14 @@ class ConfGenModel(nn.Layer):
             d[name] = d[name].reshape([-1])
 
     @staticmethod
-    def move2origin(poses, batch):
-        new_pos = []
-        pos_mean = []
+    def move2origin(poses, batch, num_nodes):
+        dim_size = batch.max() + 1
+        index = paddle.to_tensor(batch)
+        poses_mean = scatter_mean(poses, index, 0, dim_size)
+        _poses_mean = poses_mean.numpy().repeat(num_nodes, axis=0)
+        poses_mean = paddle.to_tensor(_poses_mean, dtype=poses_mean.dtype)
 
-        for i in range(batch.max() + 1):
-            pos = poses[batch == i]
-            _mean = pos.mean(axis=0)
-
-            new_pos.append(pos - _mean)
-            pos_mean.append(_mean)
-
-        return paddle.concat(new_pos), paddle.stack(pos_mean)
+        return poses - poses_mean
 
     @staticmethod
     def reparameterization(mean, log_std):
