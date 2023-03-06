@@ -1,16 +1,18 @@
 import argparse
+import copy
 import pickle
 from collections import defaultdict
 
 import numpy as np
 import paddle
 import paddle.distributed as dist
+from paddle.optimizer.lr import LambdaDecay
 
 from datasets import load_sdf_mol_to_dataset, load_pickled_mol_to_dataset, ConfGenTaskTransformFn, ConfGenTaskCollateFn
 from loss.e3_loss import compute_loss
 from model.gnn import ConfGenModel
 from pahelix.utils import load_json_config
-from utils import exempt_parameters, set_rdmol_positions, get_best_rmsd
+from utils import exempt_parameters, set_rdmol_positions, get_best_rmsd, WarmCosine
 
 from pahelix.model_zoo.gem_model import GeoGNNModel, GNNModel
 
@@ -28,6 +30,7 @@ def get_steps_per_epoch(train_num, args):
 
 def train(args, model, opt, train_data_gen, train_num):
     model.train()
+    print(f"lr: {opt.get_lr()}")
 
     steps = get_steps_per_epoch(train_num, args)
     step = 0
@@ -48,14 +51,13 @@ def train(args, model, opt, train_data_gen, train_num):
 
         loss.backward()
         opt.step()
-
-        # encoder_opt.clear_grad()
-        # decoder_opt.clear_grad()
-        # head_opt.clear_grad()
         opt.clear_grad()
+        # scheduler.step()
 
         for k, v in loss_dict.items():
             loss_accum_dict[k] += v
+        # for k in loss_accum_dict.keys():
+        #     print(f"{k} : {loss_accum_dict[k] / step + 1}")
 
         step += 1
         if step > steps:
@@ -117,32 +119,17 @@ def evaluate(args, model, valid_data_gen, valid_num):
 
 
 def main(args):
-    compound_encoder_config = load_json_config(args.compound_encoder_config)
-    model_config = load_json_config(args.model_config)
+    encoder_config = load_json_config(args.encoder_config)
+    decoder_config = load_json_config(args.decoder_config)
+    down_config = load_json_config(args.down_config)
+
     if args.dropout_rate is not None:
-        compound_encoder_config['dropout_rate'] = args.dropout_rate
-        model_config['dropout_rate'] = args.dropout_rate
+        encoder_config['dropout_rate'] = args.dropout_rate
+        decoder_config['dropout_rate'] = args.dropout_rate
+        # down_config['dropout_rate'] = args.dropout_rate
 
-    prior_model = GNNModel(compound_encoder_config)
-    encoder_model = GNNModel(compound_encoder_config)
-    decoder_model = GeoGNNModel(compound_encoder_config)
-    model = ConfGenModel(model_config, compound_encoder_config, prior_model, encoder_model, decoder_model)
-
-    # prior_params = prior_model.parameters()
-    # encoder_params = encoder_model.parameters()
-    # decoder_params = decoder_model.parameters()
-    # head_params = exempt_parameters(model.parameters(), prior_params + encoder_params + decoder_params)
-    #
-    # encoder_opt = paddle.optimizer.Adam(args.encoder_lr, parameters=encoder_params + prior_params)
-    # decoder_opt = paddle.optimizer.Adam(args.encoder_lr, parameters=decoder_params)
-    # head_opt = paddle.optimizer.Adam(args.head_lr, parameters=head_params)
-
-    model_params = model.parameters()
-    optimizer = paddle.optimizer.Adam(args.encoder_lr, parameters=model_params)
-    print('Total param num: %s' % (len(model.parameters())))
-
-    if args.distributed:
-        model = paddle.DataParallel(model)
+    if not args.distributed or dist.get_rank() == 0:
+        print("===> Converting data...")
 
     train_dataset = load_pickled_mol_to_dataset(args.train_dataset)
     train_num = len(train_dataset)
@@ -161,39 +148,54 @@ def main(args):
     train_dataset = train_dataset[dist.get_rank()::dist.get_world_size()]
     print('Total size:%s' % (len(train_dataset)))
 
-    transform_fn = ConfGenTaskTransformFn(use_self_pos=True)
+    transform_fn = ConfGenTaskTransformFn(is_inference=False, add_noise=True, only_atom_bond=True)
     train_dataset.transform(transform_fn, num_workers=args.num_workers)
     valid_dataset.transform(transform_fn, num_workers=args.num_workers)
     test_dataset.transform(transform_fn, num_workers=args.num_workers)
 
     collate_fn = ConfGenTaskCollateFn(
-        atom_names=compound_encoder_config['atom_names'],
-        bond_names=compound_encoder_config['bond_names'],
-        bond_float_names=compound_encoder_config['bond_float_names'])
+        atom_names=encoder_config['atom_names'],
+        bond_names=encoder_config['bond_names'],
+        bond_float_names=encoder_config['bond_float_names'],
+        # bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
+        # dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names']
+    )
 
     train_data_gen = train_dataset.get_data_loader(
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        shuffle=True,
+        shuffle=False,
         collate_fn=collate_fn)
 
     valid_data_gen = valid_dataset.get_data_loader(
-        batch_size=args.batch_size * 2,
+        batch_size=args.batch_size,
         num_workers=args.num_workers,
         shuffle=False,
         collate_fn=collate_fn)
 
     test_data_gen = test_dataset.get_data_loader(
-        batch_size=args.batch_size * 2,
+        batch_size=args.batch_size,
         num_workers=args.num_workers,
         shuffle=False,
         collate_fn=collate_fn)
+
+    model = ConfGenModel(encoder_config=encoder_config, decoder_config=decoder_config, down_config=down_config,
+                         recycle=args.recycle)
+
+    model_params = model.parameters()
+    # lrscheduler = WarmCosine(tmax=len(train_data_gen) * args.period, warmup=int(4e3))
+    # scheduler = LambdaDecay(args.encoder_lr, lr_lambda=lambda x: lrscheduler.step(x))
+    optimizer = paddle.optimizer.Adam(learning_rate=args.encoder_lr, parameters=model_params)
+    print('Total param num: %s' % (len(model.parameters())))
+
+    if args.distributed:
+        model = paddle.DataParallel(model)
 
     train_history = []
     for epoch in range(args.max_epoch):
         if not args.distributed or dist.get_rank() == 0:
             print("\n=====Epoch {}".format(epoch))
-            print("Training...")
+            print(f"Training at 0 / {dist.get_world_size()}...")
         # loss_dict = train(args, model, encoder_opt, decoder_opt, head_opt, train_data_gen, train_num)
         loss_dict = train(args, model, optimizer, train_data_gen, train_num)
 
@@ -227,17 +229,23 @@ def main_cli():
 
     parser.add_argument("--cached_data_path", type=str, default=None)
 
-    parser.add_argument("--compound_encoder_config", type=str)
-    parser.add_argument("--model_config", type=str)
+    parser.add_argument("--encoder_config", type=str)
+    parser.add_argument("--decoder_config", type=str)
+    parser.add_argument("--down_config", type=str)
     parser.add_argument("--init_model", type=str, default=None)
     parser.add_argument("--model_dir", type=str)
 
     parser.add_argument("--encoder_lr", type=float, default=0.001)
+    parser.add_argument("--period", type=float, default=10)
     parser.add_argument("--head_lr", type=float, default=0.001)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
 
     parser.add_argument("--vae_beta", type=float, default=1)
     parser.add_argument("--aux_loss", type=float, default=0.2)
+    parser.add_argument("--ang_lam", type=float, default=0.2)
+    parser.add_argument("--bond_lam", type=float, default=0.2)
+
+    parser.add_argument("--recycle", type=int, default=1)
     parser.add_argument("--num_message_passing_steps", type=int, default=3)
 
     parser.add_argument("--debug", action="store_true", default=False)
