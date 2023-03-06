@@ -47,7 +47,7 @@ class ConfGenTaskTransformFn:
         #     noise = np.random.uniform(-1, 1, size=gt_pos.shape)
         #     gt_pos += noise
 
-        prior_pos = np.random.uniform(-1, 1, gt_pos.shape)
+        prior_pos = np.random.uniform(-0.5, 0.5, gt_pos.shape)
         # prior_pos = gt_pos
 
         if not self.is_inference:
