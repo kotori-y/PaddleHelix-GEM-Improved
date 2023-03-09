@@ -47,7 +47,7 @@ class ConfGenTaskTransformFn:
         #     noise = np.random.uniform(-1, 1, size=gt_pos.shape)
         #     gt_pos += noise
 
-        prior_pos = np.random.uniform(-0.5, 0.5, gt_pos.shape)
+        # prior_pos = np.random.uniform(-0.5, 0.5, gt_pos.shape)
         # prior_pos = gt_pos
 
         if not self.is_inference:
@@ -55,9 +55,9 @@ class ConfGenTaskTransformFn:
         else:
             data = None
 
-        prior_data = mol_to_geognn_graph_data(mol, prior_pos, dir_type='HT', only_atom_bond=self.only_atom_bond)
+        # prior_data = mol_to_geognn_graph_data(mol, prior_pos, dir_type='HT', only_atom_bond=self.only_atom_bond)
 
-        return [prior_data, data, prior_pos, gt_pos, mol]
+        return [data, gt_pos, mol]
 
 
 class ConfGenTaskCollateFn(object):
@@ -66,13 +66,13 @@ class ConfGenTaskCollateFn(object):
             atom_names,
             bond_names,
             bond_float_names,
-            # bond_angle_float_names,
+            bond_angle_float_names,
             # dihedral_angle_float_names
          ):
         self.atom_names = atom_names
         self.bond_names = bond_names
         self.bond_float_names = bond_float_names
-        # self.bond_angle_float_names = bond_angle_float_names
+        self.bond_angle_float_names = bond_angle_float_names
         # self.dihedral_angle_float_names = dihedral_angle_float_names
 
     def _flat_shapes(self, d):
@@ -80,7 +80,7 @@ class ConfGenTaskCollateFn(object):
             d[name] = d[name].reshape([-1])
 
     def __call__(self, data_list):
-        prior_atom_bond_graph_list = []
+        # prior_atom_bond_graph_list = []
         # prior_bond_angle_graph_list = []
         # prior_angle_dihedral_graph_list = []
 
@@ -91,15 +91,15 @@ class ConfGenTaskCollateFn(object):
         batch_list = []
         num_nodes = []
         mol_list = []
-        prior_pos_list = []
+        # prior_pos_list = []
         gt_pos_list = []
 
-        for i, (prior_data, data, prior_pos, gt_pos, mol) in enumerate(data_list):
-            prior_ab_g = pgl.Graph(
-                num_nodes=len(prior_data[self.atom_names[0]]),
-                edges=prior_data['edges'],
-                node_feat={name: prior_data[name].reshape([-1, 1]) for name in self.atom_names},
-                edge_feat={name: prior_data[name].reshape([-1, 1]) for name in self.bond_names + self.bond_float_names})
+        for i, (data, gt_pos, mol) in enumerate(data_list):
+            # prior_ab_g = pgl.Graph(
+            #     num_nodes=len(prior_data[self.atom_names[0]]),
+            #     edges=prior_data['edges'],
+            #     node_feat={name: prior_data[name].reshape([-1, 1]) for name in self.atom_names},
+            #     edge_feat={name: prior_data[name].reshape([-1, 1]) for name in self.bond_names + self.bond_float_names})
             # prior_ba_g = pgl.Graph(
             #     num_nodes=len(prior_data['edges']),
             #     edges=prior_data['BondAngleGraph_edges'],
@@ -111,7 +111,7 @@ class ConfGenTaskCollateFn(object):
             #     node_feat={},
             #     edge_feat={name: prior_data[name].reshape([-1, 1]) for name in self.dihedral_angle_float_names})
 
-            prior_atom_bond_graph_list.append(prior_ab_g)
+            # prior_atom_bond_graph_list.append(prior_ab_g)
             # prior_bond_angle_graph_list.append(prior_ba_g)
             # prior_angle_dihedral_graph_list.append(prior_adi_g)
 
@@ -134,20 +134,21 @@ class ConfGenTaskCollateFn(object):
 
                 atom_bond_graph_list.append(ab_g)
                 # bond_angle_graph_list.append(ba_g)
-                # angle_dihedral_graph_list.append(adi_g)
 
-            batch_list.extend([i] * prior_ab_g.num_nodes)
+            n_atom = len(mol.GetAtoms())
+            batch_list.extend([i] * n_atom)
+            # batch_list.extend([i] * prior_ab_g.num_nodes)
             mol_list.append(mol)
-            num_nodes.append(len(mol.GetAtoms()))
+            num_nodes.append(n_atom)
 
-            prior_pos_list.append(prior_pos)
+            # prior_pos_list.append(prior_pos)
             gt_pos_list.append(gt_pos)
 
         batch_list = np.array(batch_list)
         num_nodes = np.array(num_nodes)
         batch = dict(zip(["batch", "num_nodes", "mols"], [batch_list, num_nodes, mol_list]))
 
-        prior_atom_bond_graph = pgl.Graph.batch(prior_atom_bond_graph_list)
+        # prior_atom_bond_graph = pgl.Graph.batch(prior_atom_bond_graph_list)
         # prior_bond_angle_graph = pgl.Graph.batch(prior_bond_angle_graph_list)
         # prior_angle_dihedral_graph = pgl.Graph.batch(prior_angle_dihedral_graph_list)
 
@@ -157,12 +158,12 @@ class ConfGenTaskCollateFn(object):
             # angle_dihedral_graph = pgl.Graph.batch(angle_dihedral_graph_list)
         else:
             atom_bond_graph = None
-            # bond_angle_graph = None
+            bond_angle_graph = None
             # angle_dihedral_graph = None
 
         # TODO: reshape due to pgl limitations on the shape
-        self._flat_shapes(prior_atom_bond_graph.node_feat)
-        self._flat_shapes(prior_atom_bond_graph.edge_feat)
+        # self._flat_shapes(prior_atom_bond_graph.node_feat)
+        # self._flat_shapes(prior_atom_bond_graph.edge_feat)
         # self._flat_shapes(prior_bond_angle_graph.node_feat)
         # self._flat_shapes(prior_bond_angle_graph.edge_feat)
         # self._flat_shapes(prior_angle_dihedral_graph.node_feat)
@@ -177,11 +178,11 @@ class ConfGenTaskCollateFn(object):
             # self._flat_shapes(angle_dihedral_graph.edge_feat)
 
         return {
-            "prior_atom_bond_graphs": prior_atom_bond_graph,
+            # "prior_atom_bond_graphs": prior_atom_bond_graph,
             # "prior_bond_angle_graph": prior_bond_angle_graph,
             # "prior_angle_dihedral_graph": prior_angle_dihedral_graph,
             "atom_bond_graphs": atom_bond_graph,
             # "bond_angle_graph": bond_angle_graph,
             # "angle_dihedral_graph": angle_dihedral_graph,
-        }, batch, prior_pos_list, gt_pos_list
+        }, batch, gt_pos_list
 
