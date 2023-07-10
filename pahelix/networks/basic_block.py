@@ -68,6 +68,35 @@ class MLP(nn.Layer):
         return self.mlp(x)
 
 
+class MLPwoLastAct(nn.Layer):
+    """
+    MLPwoLastAct
+    """
+    def __init__(self, layer_num, in_size, hidden_size, out_size, act, dropout_rate=0):
+        super(MLPwoLastAct, self).__init__()
+
+        layers = []
+
+        if dropout_rate > 0:
+            layers.append(nn.Dropout(dropout_rate))
+        for layer_id in range(layer_num):
+            if layer_id == 0:
+                layers.append(nn.Linear(in_size, hidden_size))
+            elif layer_id < layer_num - 1:
+                layers.append(nn.Linear(hidden_size, hidden_size))
+            else:
+                layers.append(nn.Linear(hidden_size, out_size))
+                layers.append(Activation(act))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, x):
+        """
+        Args:
+            x(tensor): (-1, dim).
+        """
+        return self.mlp(x)
+
+
 class RBF(nn.Layer):
     """
     Radial Basis Function

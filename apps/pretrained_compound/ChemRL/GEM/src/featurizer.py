@@ -19,15 +19,18 @@ downstream featurizer
 
 import numpy as np
 import pgl
+from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from pahelix.utils.compound_tools import mol_to_geognn_graph_data_MMFF3d
+from pahelix.utils.compound_tools import mol_to_geognn_graph_data_MMFF3d, mol_to_geognn_graph_data_raw3d
 
 
 class DownstreamTransformFn(object):
     """Gen features for downstream model"""
-    def __init__(self, is_inference=False):
+    def __init__(self, is_inference=False, with_provided_3d=False, shuffle_coord=False):
         self.is_inference = is_inference
+        self.with_provided_3d = with_provided_3d
+        self.shuffle_coord = shuffle_coord
 
     def __call__(self, raw_data):
         """
@@ -38,6 +41,18 @@ class DownstreamTransformFn(object):
         Returns:
             data: It contains reshape label and smiles.
         """
+        if self.with_provided_3d:
+            mol = raw_data
+            if mol is None:
+                return None
+            smiles = Chem.MolToSmiles(mol)
+            print('smiles', smiles)
+            if self.shuffle_coord:
+                print('shuffle!')
+            data = mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=self.shuffle_coord)
+            data['smiles'] = smiles
+            return data
+
         smiles = raw_data['smiles']
         print(smiles)
         mol = AllChem.MolFromSmiles(smiles)

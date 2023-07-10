@@ -24,10 +24,11 @@ import numpy as np
 
 class AnaResults:
     """tbd"""
+
     def __init__(self):
         self.dict_result1 = {}
         self.dict_result2 = {}
-    
+
     def _add_to_dict(self, d, name, value):
         if not name in d:
             d[name] = []
@@ -45,7 +46,7 @@ class AnaResults:
         self._add_to_dict(self.dict_result1, name, auc)
         name = tuple([s for s in settings if not s.startswith('dataset')])
         self._add_to_dict(self.dict_result2, name, auc)
-            
+
     def Print(self):
         """tbd"""
         self._print_dict(self.dict_result1, 'AnaResults1')
@@ -58,12 +59,22 @@ def main(args):
     for line in sys.stdin:
         segs = line.strip().split('\t')
         ana_results.add(segs[1:-1], float(segs[-1]))
-        
+
+    ana_results.Print()
+
+
+def main2(content):
+    """tbd"""
+    ana_results = AnaResults()
+    for line in content:
+        segs = line.strip().split('\t')
+        ana_results.add(segs[1:-1], float(segs[-1]))
+
     ana_results.Print()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
-    
+
     main(args)
