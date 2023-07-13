@@ -406,13 +406,14 @@ class Compound3DKit(object):
         return atom_poses
 
     @staticmethod
-    def get_MMFF_atom_poses(mol, numConfs=None, return_energy=False):
+    def get_MMFF_atom_poses(mol, numConfs=None, return_energy=False, numThreads=1):
         """the atoms of mol will be changed in some cases."""
         try:
             new_mol = Chem.AddHs(mol)
-            res = AllChem.EmbedMultipleConfs(new_mol, numConfs=numConfs)
+            res = AllChem.EmbedMultipleConfs(new_mol, numConfs=numConfs, numThreads=numThreads)
             ### MMFF generates multiple conformations
             res = AllChem.MMFFOptimizeMoleculeConfs(new_mol)
+            res = [x for x in res if x[0] == 0]
             new_mol = Chem.RemoveHs(new_mol)
             index = np.argmin([x[1] for x in res])
             energy = res[index][1]
@@ -747,7 +748,7 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False):
 def mol_to_geognn_graph_data_MMFF3d(mol):
     """tbd"""
     if len(mol.GetAtoms()) <= 400:
-        mol, atom_poses = Compound3DKit.get_MMFF_atom_poses(mol, numConfs=10)
+        mol, atom_poses = Compound3DKit.get_MMFF_atom_poses(mol, numConfs=10, numThreads=0)
     else:
         atom_poses = Compound3DKit.get_2d_atom_poses(mol)
     return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT')
