@@ -491,33 +491,17 @@ class Compound3DKit(object):
 
         if len(super_edges) == 0:
             super_edges = np.zeros([0, 2], 'int64')
-            bond_angles = np.zeros([0,], 'float32')
+            bond_angles = np.zeros([0, ], 'float32')
         else:
             super_edges = np.array(super_edges, 'int64')
             bond_angles = np.array(bond_angles, 'float32')
         return super_edges, bond_angles, bond_angle_dirs
 
     @staticmethod
-    def get_supersuperedge_dihedral(superedges, edges, atom_poses, dir_type='HT'):
+    def get_supersuperedge_dihedral(mol, superedges, edges, atom_poses, dir_type='HT'):
         """get supersuperedge dihedral"""
-        def _get_dihedral(a, b, c, d):
-            v_ba = a - b
-            v_bc = c - b
-            nabc = np.cross(v_ba, v_bc)
-
-            v_cb = b - c
-            v_cd = d - c
-            nbcd = np.cross(v_cb, v_cd)
-
-            t = np.sqrt(np.dot(nabc, nabc) * np.dot(nbcd, nbcd))
-            if t == 0:
-                return 0
-
-            temp = np.dot(nabc, nbcd) / t
-            temp = 1 if temp > 1 else temp
-            temp = -1 if temp < -1 else temp
-            theta = np.arccos(temp)
-            return theta
+        def _get_dihedral(mol, a, b, c, d):
+            return rdMolTransforms.GetDihedralRad(mol.GetConformer(), a, b, c, d)
 
         E = len(superedges)
         superedge_indices = np.arange(E)
@@ -546,11 +530,14 @@ class Compound3DKit(object):
                     continue
 
                 supersuper_edges.append([src_superedge_i, tar_superedge_i])
-                a = atom_poses[src_edge_pair[0][0]]
-                b = atom_poses[src_edge_pair[0][1]]
-                c = atom_poses[tar_edge_pair[1][0]]
-                d = atom_poses[tar_edge_pair[1][1]]
-                dihedral = _get_dihedral(a, b, c, d)
+                a = int(src_edge_pair[0][0])
+                b = int(src_edge_pair[0][1])
+                c = int(tar_edge_pair[1][0])
+                d = int(tar_edge_pair[1][1])
+                try:
+                    dihedral = _get_dihedral(mol, a, b, c, d)
+                except Exception:
+                    dihedral = 0
                 dihedral_angles.append(dihedral)
                 # bond_angle_dirs.append(src_superedge[1] == tar_edge[0])  # H -> H or H -> T
 
@@ -560,8 +547,9 @@ class Compound3DKit(object):
         else:
             supersuper_edges = np.array(supersuper_edges, 'int64')
             dihedral_angles = np.array(dihedral_angles, 'float32')
-        return supersuper_edges, dihedral_angles
 
+        dihedral_angles = np.nan_to_num(dihedral_angles)
+        return supersuper_edges, dihedral_angles
 
 
 def new_smiles_to_graph_data(smiles, **kwargs):
@@ -739,7 +727,7 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False):
     data['bond_angle'] = np.array(bond_angles, 'float32')
 
     AngleDihedralGraph_edges, dihedral_angles = \
-        Compound3DKit.get_supersuperedge_dihedral(BondAngleGraph_edges, data["edges"], data["atom_pos"])
+        Compound3DKit.get_supersuperedge_dihedral(mol, BondAngleGraph_edges, data["edges"], data["atom_pos"])
     data['AngleDihedralGraph_edges'] = AngleDihedralGraph_edges
     data['dihedral_angle'] = np.array(dihedral_angles, 'float32')
     return data

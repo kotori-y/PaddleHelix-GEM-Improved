@@ -165,7 +165,7 @@ class BondAngleFloatRBF(nn.Layer):
 
         if rbf_params is None:
             self.rbf_params = {
-                'bond_angle': (np.arange(0, np.pi, 0.1), 10.0),   # (centers, gamma)
+                'bond_angle': (np.arange(0, np.pi, 0.01), 10.0),   # (centers, gamma)
             }
         else:
             self.rbf_params = rbf_params
@@ -203,7 +203,7 @@ class DihedralAngleFloatRBF(nn.Layer):
 
         if rbf_params is None:
             self.rbf_params = {
-                'dihedral_angle': (np.arange(0, np.pi, 0.1), 10.0),  # (centers, gamma)
+                'dihedral_angle': (np.arange(-np.pi, np.pi, 0.01), 10.0),  # (centers, gamma)
             }
         else:
             self.rbf_params = rbf_params
