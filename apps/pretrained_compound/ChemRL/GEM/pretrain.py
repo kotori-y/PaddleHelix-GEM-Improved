@@ -29,6 +29,10 @@ import logging
 
 import paddle
 import paddle.distributed as dist
+import pandas as pd
+
+import gc
+
 # import pandas as pd
 
 from pahelix.datasets.inmemory_dataset import InMemoryDataset
@@ -44,11 +48,11 @@ def train(args, model, optimizer, data_gen):
     """tbd"""
     model.train()
 
-    steps = get_steps_per_epoch(args)
+    # steps = get_steps_per_epoch(args)
     step = 0
     list_loss = []
     for graph_dict, feed_dict in data_gen:
-        print('rank:%s step:%s' % (dist.get_rank(), step))
+        # print('rank:%s step:%s' % (dist.get_rank(), step))
         # if dist.get_rank() == 1:
         #     time.sleep(100000)
         for k in graph_dict:
@@ -61,9 +65,9 @@ def train(args, model, optimizer, data_gen):
         optimizer.clear_grad()
         list_loss.append(train_loss.numpy().mean())
         step += 1
-        if step > steps:
-            print("jumpping out")
-            break
+        # if step > steps:
+        #     print("jumpping out")
+        #     break
     return np.mean(list_loss)
 
 
@@ -102,8 +106,6 @@ def get_steps_per_epoch(args):
         train_num = int(20000000 * (1 - args.test_ratio))
     elif args.dataset == '3dExample':
         train_num = int(1000 * (1 - args.test_ratio))
-    else:
-        raise ValueError(args.dataset)
     if args.DEBUG:
         train_num = 100
     steps_per_epoch = int(train_num / args.batch_size)
