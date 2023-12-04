@@ -21,8 +21,7 @@ from collections import OrderedDict
 
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import AllChem
-from rdkit.Chem import rdchem
+from rdkit.Chem import AllChem, rdMolTransforms, rdchem
 
 from pahelix.utils.compound_constants import DAY_LIGHT_FG_SMARTS_LIST
 
