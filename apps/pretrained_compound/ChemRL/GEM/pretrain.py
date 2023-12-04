@@ -124,13 +124,19 @@ def load_smiles_to_dataset(data_path):
     return dataset
 
 
-def load_3dmol_to_dataset(data_path):
+def load_3dmol_to_dataset(data_path, debug=False):
     """tbd"""
-    files = sorted(glob('%s/*' % data_path))
+
+    if debug:
+        files = sorted(glob('%s/*' % data_path))[:10]
+    else:
+        files = sorted(glob('%s/*' % data_path))
+
     data_list = []
     for file in files:
         mols = Chem.SDMolSupplier(file)
-        data_list.extend([mol for mol in mols])
+        for mol in mols:
+            data_list.append(mol)
     dataset = InMemoryDataset(data_list=data_list)
     return dataset
 
@@ -148,29 +154,35 @@ def main(args):
 
     if args.distributed:
         model = paddle.DataParallel(model)
+
     opt = paddle.optimizer.Adam(learning_rate=args.lr, parameters=model.parameters())
     print('Total param num: %s' % (len(model.parameters())))
+
     for i, param in enumerate(model.named_parameters()):
         print(i, param[0], param[1].name)
 
     if not args.init_model is None and not args.init_model == "":
-        compound_encoder.set_state_dict(paddle.load(args.init_model))
+        # compound_encoder.set_state_dict(paddle.load(args.init_model))
+        model.set_state_dict(paddle.load(args.init_model))
         print('Load state_dict from %s' % args.init_model)
 
-    if os.path.exists(args.cached_data_path):
+    if args.cached_data_path and os.path.exists(args.cached_data_path) and not args.generate_data_only:
         print('Read preprocessing data...')
         dataset = InMemoryDataset(npz_data_path=args.cached_data_path)
     else:
         # get dataset
         if args.with_provided_3d:
-            dataset = load_3dmol_to_dataset(args.data_path)
+            print('debug: ', args.DEBUG)
+            dataset = load_3dmol_to_dataset(args.data_path, debug=args.DEBUG)
         else:
             dataset = load_smiles_to_dataset(args.data_path)
 
         if args.DEBUG:
-            dataset = dataset[100:180]
+            dataset = dataset[:10]
+
         dataset = dataset[dist.get_rank()::dist.get_world_size()]
         print('Total size:%s' % (len(dataset)))
+
         if not args.with_provided_3d:
             smiles_lens = [len(smiles) for smiles in dataset]
             print('Dataset smiles min/max/avg length: %s/%s/%s' % (
@@ -179,7 +191,10 @@ def main(args):
                                           args.with_provided_3d)
         # this step will be time consuming due to rdkit 3d calculation
         dataset.transform(transform_fn, num_workers=args.num_workers)
-        dataset.save_data(args.cached_data_path)
+        if args.cached_data_path:
+            dataset.save_data(args.cached_data_path)
+        if args.generate_data_only:
+            return
 
     test_index = int(len(dataset) * (1 - args.test_ratio))
     train_dataset = dataset[:test_index]
@@ -211,8 +226,10 @@ def main(args):
         train_loss = train(args, model, opt, train_data_gen)
         test_loss = evaluate(args, model, test_dataset, collate_fn)
         if not args.distributed or dist.get_rank() == 0:
-            paddle.save(compound_encoder.state_dict(),
-                        '%s/epoch%d.pdparams' % (args.model_dir, epoch_id))
+
+            paddle.save(model.state_dict(), '%s/model/epoch%d.pdparams' % (args.model_dir, epoch_id))
+            paddle.save(compound_encoder.state_dict(), '%s/encoder/epoch%d.pdparams' % (args.model_dir, epoch_id))
+
             list_test_loss.append(test_loss['loss'])
             print("epoch:%d train/loss:%s" % (epoch_id, train_loss))
             print("epoch:%d test/loss:%s" % (epoch_id, test_loss))
@@ -220,7 +237,15 @@ def main(args):
 
             info = {**{"train": train_loss}, **test_loss}
             history.append(info)
-            # pd.DataFrame(history).T.to_csv("/mnt/e/webWork/listening-ml/public/geognn_advenced.csv", header=False)
+
+            name, root = args.dataset.split("@")
+            path = f"./data/results/{root}/{name}"
+
+            if not os.path.exists(path):
+                os.makedirs(path)
+
+            pd.DataFrame(history).to_csv(f"./{path}/{name}_{epoch_id}.csv", index=False)
+            gc.collect()
 
     if not args.distributed or dist.get_rank() == 0:
         print('Best epoch id:%s' % np.argmin(list_test_loss))
@@ -232,6 +257,7 @@ if __name__ == '__main__':
     parser.add_argument("--distributed", action='store_true', default=False)
     parser.add_argument("--with_provided_3d", action='store_true', default=False)
     parser.add_argument("--cached_data_path", type=str, default=None)
+    parser.add_argument("--generate_data_only", action='store_true', default=False)
 
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -246,6 +272,9 @@ if __name__ == '__main__':
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
     args = parser.parse_args()
+
+    if args.generate_data_only:
+        args.distributed = False
 
     if args.distributed:
         dist.init_parallel_env()
