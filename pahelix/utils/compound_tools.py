@@ -16,6 +16,7 @@
 | Tools for compound features.
 | Adapted from https://github.com/snap-stanford/pretrain-gnns/blob/master/chem/loader.py
 """
+import json
 import os
 from collections import OrderedDict
 
@@ -447,6 +448,14 @@ class Compound3DKit(object):
         return bond_lengths
 
     @staticmethod
+    def get_bond_borders(edges, wiberg):
+        bond_orders = []
+        for src_node_i, tar_node_j in edges:
+            bond_orders.append(wiberg[src_node_i, tar_node_j])
+        bond_orders = np.array(bond_orders, 'float32')
+        return bond_orders
+
+    @staticmethod
     def get_superedge_angles(edges, atom_poses, dir_type='HT'):
         """get superedge angles"""
         # def _get_vec(atom_poses, edge):
@@ -620,10 +629,10 @@ def new_mol_to_graph_data(mol):
     data['edges'] = np.array(data['edges'], 'int64')
 
     ### morgan fingerprint
-    data['morgan_fp'] = np.array(CompoundKit.get_morgan_fingerprint(mol), 'int64')
-    # data['morgan2048_fp'] = np.array(CompoundKit.get_morgan2048_fingerprint(mol), 'int64')
-    data['maccs_fp'] = np.array(CompoundKit.get_maccs_fingerprint(mol), 'int64')
-    data['daylight_fg_counts'] = np.array(CompoundKit.get_daylight_functional_group_counts(mol), 'int64')
+    # data['morgan_fp'] = np.array(CompoundKit.get_morgan_fingerprint(mol), 'int64')
+    # # data['morgan2048_fp'] = np.array(CompoundKit.get_morgan2048_fingerprint(mol), 'int64')
+    # data['maccs_fp'] = np.array(CompoundKit.get_maccs_fingerprint(mol), 'int64')
+    # data['daylight_fg_counts'] = np.array(CompoundKit.get_daylight_functional_group_counts(mol), 'int64')
     return data
 
 
@@ -698,10 +707,10 @@ def mol_to_graph_data(mol):
     data['edges'] = np.array(data['edges'], 'int64')
 
     ### morgan fingerprint
-    data['morgan_fp'] = np.array(CompoundKit.get_morgan_fingerprint(mol), 'int64')
+    # data['morgan_fp'] = np.array(CompoundKit.get_morgan_fingerprint(mol), 'int64')
     # data['morgan2048_fp'] = np.array(CompoundKit.get_morgan2048_fingerprint(mol), 'int64')
-    data['maccs_fp'] = np.array(CompoundKit.get_maccs_fingerprint(mol), 'int64')
-    data['daylight_fg_counts'] = np.array(CompoundKit.get_daylight_functional_group_counts(mol), 'int64')
+    # data['maccs_fp'] = np.array(CompoundKit.get_maccs_fingerprint(mol), 'int64')
+    # data['daylight_fg_counts'] = np.array(CompoundKit.get_daylight_functional_group_counts(mol), 'int64')
     return data
 
 
@@ -729,13 +738,31 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False):
         Compound3DKit.get_supersuperedge_dihedral(mol, BondAngleGraph_edges, data["edges"], data["atom_pos"])
     data['AngleDihedralGraph_edges'] = AngleDihedralGraph_edges
     data['dihedral_angle'] = np.array(dihedral_angles, 'float32')
+
+    props = mol.GetPropsAsDict()
+    if 'cm5' in props:
+        data['cm5'] = np.array(json.loads(props['cm5'])).astype('float32')
+
+    if 'espc' in props:
+        data['espc'] = np.array(json.loads(props['espc'])).astype('float32')
+
+    if 'cm5' in props:
+        data['hirshfeld'] = np.array(json.loads(props['hirshfeld'])).astype('float32')
+
+    if 'cm5' in props:
+        data['npa'] = np.array(json.loads(props['npa'])).astype('float32')
+
+    if 'wiberg' in props:
+        wiberg = np.array(json.loads(props['wiberg'])).astype('float32')
+        data['bond_order'] = Compound3DKit.get_bond_borders(data['edges'], wiberg)
+
     return data
 
 
 def mol_to_geognn_graph_data_MMFF3d(mol):
     """tbd"""
     if len(mol.GetAtoms()) <= 400:
-        mol, atom_poses = Compound3DKit.get_MMFF_atom_poses(mol, numConfs=10, numThreads=0)
+        mol, atom_poses = Compound3DKit.get_MMFF_atom_poses(mol, numConfs=3, numThreads=0)
     else:
         atom_poses = Compound3DKit.get_2d_atom_poses(mol)
     return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT')
@@ -745,9 +772,6 @@ def mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False):
     """tbd"""
     atom_poses = Compound3DKit.get_atom_poses(mol, mol.GetConformer())
     return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT', shuffle_coord=shuffle_coord)
-
-
-
 
 
 

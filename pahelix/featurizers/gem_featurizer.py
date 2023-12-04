@@ -222,6 +222,13 @@ class GeoPredTransformFn(object):
         data['Ad_node_i'] = indice.reshape([-1, 1])
         data['Ad_node_j'] = indice.T.reshape([-1, 1])
         data['Ad_atom_dist'] = dist_matrix.reshape([-1, 1])
+
+        data['atom_cm5'] = np.array(data.get('cm5', []))
+        data['atom_espc'] = np.array(data.get('espc', []))
+        data['atom_hirshfeld'] = np.array(data.get('hirshfeld', []))
+        data['atom_npa'] = np.array(data.get('npa', []))
+        data['bo_bond_order'] = np.array(data.get('bond_order', []))
+
         return data
 
     def __call__(self, raw_data):
@@ -309,6 +316,12 @@ class GeoPredCollateFn(object):
         Ad_node_j = []
         Ad_atom_dist = []
 
+        bo_bond_order = []
+        atom_cm5 = []
+        atom_espc = []
+        atom_hirshfeld = []
+        atom_npa = []
+
         node_count = 0
         for data in batch_data_list:
             N = len(data[self.atom_names[0]])
@@ -359,10 +372,20 @@ class GeoPredCollateFn(object):
                 Bl_node_i.append(data['Bl_node_i'] + node_count)
                 Bl_node_j.append(data['Bl_node_j'] + node_count)
                 Bl_bond_length.append(data['Bl_bond_length'])
+                if 'wiberg' in self.pretrain_tasks:
+                    bo_bond_order.append(data['bo_bond_order'])
             if 'Adc' in self.pretrain_tasks:
                 Ad_node_i.append(data['Ad_node_i'] + node_count)
                 Ad_node_j.append(data['Ad_node_j'] + node_count)
                 Ad_atom_dist.append(data['Ad_atom_dist'])
+            if 'cm5' in self.pretrain_tasks:
+                atom_cm5.append(data['atom_cm5'])
+            if 'espc' in self.pretrain_tasks:
+                atom_espc.append(data['atom_espc'])
+            if 'hirshfeld' in self.pretrain_tasks:
+                atom_hirshfeld.append(data['atom_hirshfeld'])
+            if 'npa' in self.pretrain_tasks:
+                atom_npa.append(data['atom_npa'])
 
             node_count += N
 
@@ -421,9 +444,20 @@ class GeoPredCollateFn(object):
             feed_dict['Bl_node_i'] = np.concatenate(Bl_node_i, 0).reshape(-1).astype('int64')
             feed_dict['Bl_node_j'] = np.concatenate(Bl_node_j, 0).reshape(-1).astype('int64')
             feed_dict['Bl_bond_length'] = np.concatenate(Bl_bond_length, 0).reshape(-1, 1).astype('float32')
+            if 'wiberg' in self.pretrain_tasks:
+                feed_dict['bo_bond_order'] = np.concatenate(bo_bond_order, 0).reshape(-1, 1).astype('float32')
         if 'Adc' in self.pretrain_tasks:
             feed_dict['Ad_node_i'] = np.concatenate(Ad_node_i, 0).reshape(-1).astype('int64')
             feed_dict['Ad_node_j'] = np.concatenate(Ad_node_j, 0).reshape(-1).astype('int64')
             feed_dict['Ad_atom_dist'] = np.concatenate(Ad_atom_dist, 0).reshape(-1, 1).astype('float32')
+        if 'cm5' in self.pretrain_tasks:
+            feed_dict['atom_cm5'] = np.hstack(atom_cm5).astype('float32')
+        if 'espc' in self.pretrain_tasks:
+            feed_dict['atom_espc'] = np.hstack(atom_espc).astype('float32')
+        if 'hirshfeld' in self.pretrain_tasks:
+            feed_dict['atom_hirshfeld'] = np.hstack(atom_hirshfeld).astype('float32')
+        if 'npa' in self.pretrain_tasks:
+            feed_dict['atom_npa'] = np.hstack(atom_npa).astype('float32')
+
         return graph_dict, feed_dict
 

@@ -344,6 +344,61 @@ class GeoPredModel(nn.Layer):
                     dropout_rate=self.dropout_rate)
             self.Adc_loss = nn.CrossEntropyLoss()
 
+        # step 2
+        # cm5 charge prediction
+        if 'cm5' in self.pretrain_tasks:
+            self.cm5_mlp = MLP(
+                layer_num=2, 
+                in_size=self.compound_encoder.embed_dim,
+                hidden_size=self.hidden_size,
+                out_size=1,
+                act=self.act,
+                dropout_rate=self.dropout_rate
+            )
+            self.cm5_loss = nn.SmoothL1Loss()
+        # espc charge prediction
+        if 'espc' in self.pretrain_tasks:
+            self.espc_mlp = MLP(
+                layer_num=2,
+                in_size=self.compound_encoder.embed_dim,
+                hidden_size=self.hidden_size,
+                out_size=1,
+                act=self.act,
+                dropout_rate=self.dropout_rate
+            )
+            self.espc_loss = nn.SmoothL1Loss()
+        # hirshfeld charge prediction
+        if 'hirshfeld' in self.pretrain_tasks:
+            self.hirshfeld_mlp = MLP(
+                layer_num=2,
+                in_size=self.compound_encoder.embed_dim,
+                hidden_size=self.hidden_size,
+                out_size=1,
+                act=self.act,
+                dropout_rate=self.dropout_rate
+            )
+            self.hirshfeld_loss = nn.SmoothL1Loss()
+        # npa charge prediction
+        if 'npa' in self.pretrain_tasks:
+            self.npa_mlp = MLP(
+                layer_num=2,
+                in_size=self.compound_encoder.embed_dim,
+                hidden_size=self.hidden_size,
+                out_size=1,
+                act=self.act,
+                dropout_rate=self.dropout_rate
+            )
+            self.npa_loss = nn.SmoothL1Loss()
+        # bond order with regression
+        if 'wiberg' in self.pretrain_tasks:
+            self.bo_mlp = MLP(2,
+                               hidden_size=self.hidden_size,
+                               act=self.act,
+                               in_size=compound_encoder.embed_dim * 2,
+                               out_size=1,
+                               dropout_rate=self.dropout_rate)
+            self.bo_loss = nn.SmoothL1Loss()
+
         print('[GeoPredModel] pretrain_tasks:%s' % str(self.pretrain_tasks))
 
     def _get_Cm_loss(self, feed_dict, node_repr):
@@ -397,6 +452,34 @@ class GeoPredModel(nn.Layer):
         atom_dist_id = paddle.cast(atom_dist / 20.0 * self.Adc_vocab, 'int64')
         loss = self.Adc_loss(logits, atom_dist_id)
         return loss
+    
+    def _get_cm5_loss(self, feed_dict, node_repr):
+        pred = self.cm5_mlp(node_repr)
+        loss = self.cm5_loss(pred, feed_dict['atom_cm5'].unsqueeze(1))
+        return loss
+
+    def _get_espc_loss(self, feed_dict, node_repr):
+        pred = self.espc_mlp(node_repr)
+        loss = self.espc_loss(pred, feed_dict['atom_espc'].unsqueeze(1))
+        return loss
+
+    def _get_hirshfeld_loss(self, feed_dict, node_repr):
+        pred = self.hirshfeld_mlp(node_repr)
+        loss = self.hirshfeld_loss(pred, feed_dict['atom_hirshfeld'].unsqueeze(1))
+        return loss
+
+    def _get_npa_loss(self, feed_dict, node_repr):
+        pred = self.npa_mlp(node_repr)
+        loss = self.npa_loss(pred, feed_dict['atom_npa'].unsqueeze(1))
+        return loss
+
+    def _get_bo_loss(self, feed_dict, node_repr):
+        node_i_repr = paddle.gather(node_repr, feed_dict['Bl_node_i'])
+        node_j_repr = paddle.gather(node_repr, feed_dict['Bl_node_j'])
+        node_ij_repr = paddle.concat([node_i_repr, node_j_repr], 1)
+        pred = self.bo_mlp(node_ij_repr)
+        loss = self.bo_loss(pred, feed_dict['bo_bond_order'])
+        return loss
 
     def forward(self, graph_dict, feed_dict, return_subloss=False):
         """
@@ -427,10 +510,26 @@ class GeoPredModel(nn.Layer):
         if 'Adc' in self.pretrain_tasks:
             sub_losses['Adc_loss'] = self._get_Adc_loss(feed_dict, node_repr)
             sub_losses['Adc_loss'] += self._get_Adc_loss(feed_dict, masked_node_repr)
+        if 'cm5' in self.pretrain_tasks:
+            sub_losses['cm5_loss'] = self._get_cm5_loss(feed_dict, node_repr)
+            sub_losses['cm5_loss'] += self._get_cm5_loss(feed_dict, masked_node_repr)
+        if 'espc' in self.pretrain_tasks:
+            sub_losses['espc_loss'] = self._get_espc_loss(feed_dict, node_repr)
+            sub_losses['espc_loss'] += self._get_espc_loss(feed_dict, masked_node_repr)
+        if 'hirshfeld' in self.pretrain_tasks:
+            sub_losses['hirshfeld_loss'] = self._get_hirshfeld_loss(feed_dict, node_repr)
+            sub_losses['hirshfeld_loss'] += self._get_hirshfeld_loss(feed_dict, masked_node_repr)
+        if 'npa' in self.pretrain_tasks:
+            sub_losses['npa_loss'] = self._get_npa_loss(feed_dict, node_repr)
+            sub_losses['npa_loss'] += self._get_npa_loss(feed_dict, masked_node_repr)
+        if 'wiberg' in self.pretrain_tasks:
+            sub_losses['bo_loss'] = self._get_bo_loss(feed_dict, node_repr)
+            sub_losses['bo_loss'] += self._get_bo_loss(feed_dict, masked_node_repr)
 
         loss = 0
         for name in sub_losses:
             loss += sub_losses[name]
+
         if return_subloss:
             return loss, sub_losses
         else:
