@@ -183,6 +183,73 @@ class GeoGNNModel(nn.Layer):
         return node_repr, edge_repr, graph_repr
 
 
+class GNNModel(nn.Layer):
+    """
+    The GeoGNN Model used in GEM.
+
+    Args:
+        model_config(dict): a dict of model configurations.
+    """
+
+    def __init__(self, model_config={}):
+        super(GNNModel, self).__init__()
+
+        self.embed_dim = model_config.get('embed_dim', 32)
+        self.dropout_rate = model_config.get('dropout_rate', 0.2)
+        self.layer_num = model_config.get('layer_num', 8)
+        self.readout = model_config.get('readout', 'mean')
+
+        self.atom_names = model_config['atom_names']
+        self.bond_names = model_config['bond_names']
+
+        self.init_atom_embedding = AtomEmbedding(self.atom_names, self.embed_dim)
+
+        self.bond_embedding_list = nn.LayerList()
+
+        self.atom_bond_block_list = nn.LayerList()
+
+        for layer_id in range(self.layer_num):
+            self.bond_embedding_list.append(
+                BondEmbedding(self.bond_names, self.embed_dim)
+            )
+            self.atom_bond_block_list.append(
+                GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1))
+            )
+
+        # TODO: use self-implemented MeanPool due to pgl bug.
+        if self.readout == 'mean':
+            self.graph_pool = MeanPool()
+        else:
+            self.graph_pool = pgl.nn.GraphPool(pool_type=self.readout)
+
+    @property
+    def node_dim(self):
+        """the out dim of graph_repr"""
+        return self.embed_dim
+
+    @property
+    def graph_dim(self):
+        """the out dim of graph_repr"""
+        return self.embed_dim
+
+    def forward(self, atom_bond_graph):
+        """
+        Build the network.
+        """
+        node_repr = self.init_atom_embedding(atom_bond_graph.node_feat)
+
+        for layer_id in range(self.layer_num):
+            edge_repr = self.bond_embedding_list[layer_id](atom_bond_graph.edge_feat)
+            node_repr = self.atom_bond_block_list[layer_id](
+                atom_bond_graph,
+                node_repr,
+                edge_repr
+            )
+
+        graph_repr = self.graph_pool(atom_bond_graph, node_repr)
+        return node_repr, edge_repr, graph_repr
+
+
 class GeoGNNModelOld(nn.Layer):
     """
     The GeoGNN Model used in GEM.

@@ -714,7 +714,7 @@ def mol_to_graph_data(mol):
     return data
 
 
-def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False):
+def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, only_atom_bond=False):
     """
     mol: rdkit molecule
     dir_type: direction type for bond_angle grpah
@@ -725,9 +725,13 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False):
     data = mol_to_graph_data(mol)
 
     data['atom_pos'] = np.array(atom_poses, 'float32')
+
     if shuffle_coord:
         data['atom_pos'] += np.random.uniform(0, 0.5, data['atom_pos'].shape)
-        # np.random.shuffle(data['atom_pos'])
+
+    if only_atom_bond:
+        return data
+
     data['bond_length'] = Compound3DKit.get_bond_lengths(data['edges'], data['atom_pos'])
     BondAngleGraph_edges, bond_angles, bond_angle_dirs = \
             Compound3DKit.get_superedge_angles(data['edges'], data['atom_pos'])
@@ -759,19 +763,21 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False):
     return data
 
 
-def mol_to_geognn_graph_data_MMFF3d(mol):
+def mol_to_geognn_graph_data_MMFF3d(mol, only_atom_bond=False):
     """tbd"""
     if len(mol.GetAtoms()) <= 400:
         mol, atom_poses = Compound3DKit.get_MMFF_atom_poses(mol, numConfs=3, numThreads=0)
     else:
         atom_poses = Compound3DKit.get_2d_atom_poses(mol)
-    return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT')
+    return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT', only_atom_bond=only_atom_bond)
 
 
-def mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False):
+def mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False, only_atom_bond=False):
     """tbd"""
     atom_poses = Compound3DKit.get_atom_poses(mol, mol.GetConformer())
-    return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT', shuffle_coord=shuffle_coord)
+    return mol_to_geognn_graph_data(
+        mol, atom_poses, dir_type='HT', shuffle_coord=shuffle_coord, only_atom_bond=only_atom_bond
+    )
 
 
 
