@@ -27,6 +27,10 @@ def main(args):
     decoder_config = load_json_config(args.decoder_config)
     # aux_config = load_json_config(args.aux_config)
     head_config = load_json_config(args.head_config)
+    model_config = load_json_config(args.model_config)
+
+    # head_config = {**head_config, **model_config}
+
     #
     # if args.dropout_rate is not None:
     #     encoder_config['dropout_rate'] = args.dropout_rate
@@ -64,7 +68,8 @@ def main(args):
             bond_names=encoder_config['bond_names'],
             bond_float_names=encoder_config['bond_float_names'],
             bond_angle_float_names=encoder_config['bond_angle_float_names'],
-            dihedral_angle_float_names=encoder_config['dihedral_angle_float_names']
+            dihedral_angle_float_names=encoder_config['dihedral_angle_float_names'],
+            pretrain_tasks=head_config['pretrain_tasks']
         )
 
         train_data_gen = train_dataset.get_data_loader(
@@ -76,10 +81,11 @@ def main(args):
 
         prior = GNNModel(prior_config)
         encoder = GeoGNNModel(encoder_config)
+        decoder = GNNModel(decoder_config)
 
-        model = VAE(prior, encoder, head_config)
+        model = VAE(prior, encoder, decoder, head_config)
 
-        for prior_graph, encoder_graph in train_data_gen:
+        for prior_graph, encoder_graph, decoder_graph, decoder_feed in train_data_gen:
 
             for k in prior_graph:
                 prior_graph[k] = prior_graph[k].tensor()
@@ -87,7 +93,13 @@ def main(args):
             for k in encoder_graph:
                 encoder_graph[k] = encoder_graph[k].tensor()
 
-            model(prior_graph, encoder_graph)
+            for k in decoder_graph:
+                decoder_graph[k] = decoder_graph[k].tensor()
+
+            for k in decoder_feed:
+                decoder_feed[k] = paddle.to_tensor(decoder_feed[k])
+
+            model(prior_graph, encoder_graph, decoder_graph, decoder_feed)
 
 
 def main_cli():
@@ -107,6 +119,7 @@ def main_cli():
     parser.add_argument("--encoder_config", type=str)
     parser.add_argument("--decoder_config", type=str)
     parser.add_argument("--head_config", type=str)
+    parser.add_argument("--model_config", type=str)
     # parser.add_argument("--aux_config", type=str)
 
     parser.add_argument("--init_model", type=str, default=None)
