@@ -161,6 +161,7 @@ def main(args):
         criterion = nn.MSELoss()
     else:
         criterion = nn.L1Loss()
+
     encoder_params = compound_encoder.parameters()
     head_params = exempt_parameters(model.parameters(), encoder_params)
     encoder_opt = paddle.optimizer.Adam(args.encoder_lr, parameters=encoder_params)
@@ -172,7 +173,8 @@ def main(args):
         print(i, param[0], param[1].name)
 
     if not args.init_model is None and not args.init_model == "":
-        compound_encoder.set_state_dict(paddle.load(args.init_model))
+        # compound_encoder.set_state_dict(paddle.load(args.init_model))
+        model.set_state_dict(paddle.load(args.init_model))
         print('Load state_dict from %s' % args.init_model)
 
     ### load data    

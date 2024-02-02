@@ -18,6 +18,7 @@ GEM pretrain
 """
 
 import os
+import pickle
 from os.path import join, exists, basename
 import sys
 import json
@@ -94,7 +95,8 @@ def evaluate(args, model, test_dataset, collate_fn):
                 dict_loss[name] = []
             v_np = sub_losses[name].numpy()
             dict_loss[name].append(v_np)
-        dict_loss['loss'] = loss.numpy()
+        # dict_loss['loss'] = loss.numpy()
+        dict_loss['loss'].append(loss.numpy().mean())
     dict_loss = {name: np.mean(dict_loss[name]) for name in dict_loss}
     return dict_loss
 
@@ -211,7 +213,8 @@ def main(args):
         dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names'],
         pretrain_tasks=model_config['pretrain_tasks'],
         mask_ratio=model_config['mask_ratio'],
-        Cm_vocab=model_config['Cm_vocab'])
+        Cm_vocab=model_config['Cm_vocab']
+    )
 
     train_data_gen = train_dataset.get_data_loader(
         batch_size=args.batch_size,

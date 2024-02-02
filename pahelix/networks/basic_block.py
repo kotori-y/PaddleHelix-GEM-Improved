@@ -63,8 +63,8 @@ class MLP(nn.Layer):
     def forward(self, x):
         """
         Args:
-            x(tensor): (-1, dim).
-        """
+                x(tensor): (-1, dim).
+            """
         return self.mlp(x)
 
 
