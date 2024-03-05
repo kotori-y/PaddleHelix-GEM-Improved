@@ -31,7 +31,7 @@ Firstly, download or clone the lastest github repository:
 ```shell
 git clone https://github.com/kotori-y/PaddleHelix-GEM-Improved.git
 cd PaddleHelix-GEM-Improved
-git checkout remotes/origin/gem-advanced
+git checkout gem-advanced
 cd apps/pretrained_compound/ChemRL/GEM
 ```
 
