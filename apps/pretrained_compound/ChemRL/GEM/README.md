@@ -1,12 +1,7 @@
-# Geometry Enhanced Molecular Representation Learning for Property Prediction
+# Quantum-enhanced Molecular 3D Representation Learning for Property Prediction
 
 # Background
-Recent advances in graph neural networks (GNNs) have shown great promise in applying GNNs for molecular representation learning. However, existing GNNs usually treat molecules as topological graph data without fully utilizing the molecular geometry information, which is one of the most critical factors for determining molecular physical, chemical, and biological properties. 
-
-To this end, we propose a novel **G**eometry **E**nhanced **M**olecular representation learning method (GEM):
-
-* At first, we design a geometry-based GNN architecture (GeoGNN) that simultaneously models atoms, bonds, and bond angles in a molecule. 
-* Moreover, on top of the devised GNN architecture, we propose several novel geometry-level self-supervised learning strategies to learn spatial knowledge by utilizing the local and global molecular 3D structures.
+*TODO*
 
 
 # Installation guide
@@ -33,52 +28,45 @@ To this end, we propose a novel **G**eometry **E**nhanced **M**olecular represen
 
 Firstly, download or clone the lastest github repository:
 
-    git clone https://github.com/PaddlePaddle/PaddleHelix.git
-    git checkout dev
-    cd apps/pretrained_compound/ChemRL/GEM
+```shell
+git clone https://github.com/kotori-y/PaddleHelix-GEM-Improved.git
+cd PaddleHelix-GEM-Improved
+git checkout remotes/origin/gem-advanced
+cd apps/pretrained_compound/ChemRL/GEM
+```
 
 ## Pretraining
 Use the following command to download the demo data which is a tiny subset [Zinc Dataset](https://zinc.docking.org/) and run pretrain tasks.
 
-    sh scripts/pretrain.sh
+```shell
+cd scripts/pretrain && sh pretrain_ddp.sh
+```
 
-Note that the data preprocessing step will be time-consuming since it requires running MMFF optimization for all molecules. The demo data will take several hours to finish in a single V100 GPU card. The pretrained model will be save under `./pretrain_models`.
+The pretrained model will be save under `./pretrain_models`.
 
-We also provide our pretrained model [here](https://baidu-nlp.bj.bcebos.com/PaddleHelix/pretrained_models/compound/pretrain_models-chemrl_gem.tgz) for reproducing the downstream finetuning results. Also, the pretrained model can be used for other molecular property prediction tasks.
+We also provide a series pretrained models [here](https://github.com/kotori-y/SomeData/releases/download/v1.0/pretrained_models.tar.gz) for reproducing the downstream finetuning results. Also, the pretrained model can be used for other molecular property prediction tasks.
 
 ## Downstream finetuning
 After the pretraining, the downstream tasks can use the pretrained model as initialization. 
 
 Firstly, download the pretrained model from the previous step:
 
-    wget https://baidu-nlp.bj.bcebos.com/PaddleHelix/pretrained_models/compound/pretrain_models-chemrl_gem.tgz
-    tar xzf pretrain_models-chemrl_gem.tgz
+```shell
+# cd PaddleHelix-GEM-Improved/apps/pretrained_compound/ChemRL/GEM
+wget https://github.com/kotori-y/SomeData/releases/download/v1.0/pretrained_models.tar.gz
+tar -zxvf pretrain_models-chemrl_gem.tgz
+```
 
 Download the downstream molecular property prediction datasets from [MoleculeNet](http://moleculenet.ai/), including classification tasks and regression tasks:
 
-    wget https://baidu-nlp.bj.bcebos.com/PaddleHelix/datasets/compound_datasets/chemrl_downstream_datasets.tgz
-    tar xzf chemrl_downstream_datasets.tgz
-    
+```shell
+# cd PaddleHelix-GEM-Improved/apps/pretrained_compound/ChemRL/GEM
+wget https://github.com/kotori-y/SomeData/releases/download/v1.0/chemrl_downstream_datasets.tar.gz
+tar -zxvf chemrl_downstream_datasets.tgz
+```
+
 Run downstream finetuning and the final results will be saved under `./log/pretrain-$dataset/final_result`. 
 
-    # classification tasks
-    sh scripts/finetune_class.sh
-    # regression tasks
-    sh scripts/finetune_regr.sh
-
-The whole finetuning process for all datasets requires 1-2 days in a single V100 GPU card.
-
-## Citation
-If you use the code or data in this package, please cite:
-
-```bibtex
-@article{fang2022geometry,
-  title={Geometry-enhanced molecular representation learning for property prediction},
-  author={Fang, Xiaomin and Liu, Lihang and Lei, Jieqiong and He, Donglong and Zhang, Shanzhuo and Zhou, Jingbo and Wang, Fan and Wu, Hua and Wang, Haifeng},
-  journal={Nature Machine Intelligence},
-  pages={1--8},
-  year={2022},
-  publisher={Nature Publishing Group},
-  doi={10.1038/s42256-021-00438-4}
-}
+```shell
+cd scripts/finetune && sh submit_finetune.sh
 ```
