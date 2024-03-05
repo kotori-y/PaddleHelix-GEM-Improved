@@ -47,20 +47,22 @@ select finetune_model in "only_geometry" "geometry_cm5_wiberg" "geometry_espc_wi
   break;
 done
 
-sinfo -p gpu,gpu1,gpu3,gpu4,cp1 -O partition:10,nodes:7,nodelist:30,statecompact:10,gres,GresUsed:30sin
+#sinfo -p gpu,gpu1,gpu3,gpu4,cp1 -O partition:10,nodes:7,nodelist:30,statecompact:10,gres,GresUsed:30sin
 
-echo "Choose your node"
+#echo "Choose your node"
 
-select gpu in "gpu" "gpu1" "gpu3" "gpu4"; do
-  break;
-done
+#select gpu in "gpu" "gpu1" "gpu3" "gpu4"; do
+#  break;
+#done
 
 # echo "yhbatch -N 1 -p $gpu --gpus-per-node=1 -J $job"_"${task^} --cpus-per-gpu=8 -o $finetune_model"_finetune_clsss.log" finetune_class.sh $finetune_model $init_model"
 
-echo "use $init_model"
+echo "use $init_model for $task task"
 
 if [ $task = "classification" ]; then
-  yhbatch -N 1 -p $gpu --gpus-per-node=1 -J $job"_"$task --cpus-per-gpu=6 -o $finetune_model"_finetune_clsss.log" finetune_class.sh $finetune_model $init_model
+#  yhbatch -N 1 -p $gpu --gpus-per-node=1 -J $job"_"$task --cpus-per-gpu=6 -o $finetune_model"_finetune_clsss.log" finetune_class.sh $finetune_model $init_model
+  sh finetune_class.sh $finetune_model $init_model
 else [ $task = "regression" ]
-  yhbatch -N 1 -p $gpu --gpus-per-node=1 -J $job"_"$task --cpus-per-gpu=6 -o $finetune_model"_finetune_regr.log" finetune_regr.sh $finetune_model $init_model
+#  yhbatch -N 1 -p $gpu --gpus-per-node=1 -J $job"_"$task --cpus-per-gpu=6 -o $finetune_model"_finetune_regr.log" finetune_regr.sh $finetune_model $init_model
+  sh finetune_regr.sh $finetune_model $init_model
 fi
