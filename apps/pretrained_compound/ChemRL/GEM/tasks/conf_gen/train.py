@@ -36,18 +36,20 @@ def train(args, model, opt, train_data_gen, train_num):
     step = 0
     loss_accum_dict = defaultdict(float)
 
-    for net_input, batch, prior_pos_list, gt_pos_list in train_data_gen:
+    for net_input, feed_dict, batch, gt_pos_list in train_data_gen:
         net_input = {k: v.tensor() for k, v in net_input.items()}
+        feed_dict = {k: paddle.to_tensor(v, dtype=paddle.float32) for k, v in feed_dict.items()}
 
         gt_pos_list = paddle.to_tensor(np.vstack(gt_pos_list), dtype=paddle.float32)
-        prior_pos_list = paddle.to_tensor(np.vstack(prior_pos_list), dtype=paddle.float32)
+        # prior_pos_list = paddle.to_tensor(np.vstack(prior_pos_list), dtype=paddle.float32)
 
         net_input["batch"] = batch
-        # net_input["gt_poses"] = gt_pos_list
-        net_input["prior_poses"] = prior_pos_list
+        net_input["gt_pos_list"] = gt_pos_list
+        # net_input["prior_poses"] = prior_pos_list
 
-        extra_output, pos_list = model(**net_input)
-        loss, loss_dict = compute_loss(extra_output, pos_list, gt_pos_list, batch, args)
+        loss, loss_dict, _ = model(**net_input, feed_dict=feed_dict, args=args)
+        # extra_output, feed_dict, gt_pos, pos_list, aux_dict, batch, args
+        # loss, loss_dict = compute_loss(extra_output, feed_dict, gt_pos_list, pos_list, batch, args)
 
         loss.backward()
         opt.step()
@@ -69,6 +71,7 @@ def train(args, model, opt, train_data_gen, train_num):
     return loss_accum_dict
 
 
+@paddle.no_grad()
 def evaluate(args, model, valid_data_gen, valid_num):
     model.eval()
 
@@ -78,18 +81,18 @@ def evaluate(args, model, valid_data_gen, valid_num):
     mol_labels = []
     mol_preds = []
 
-    for net_input, batch, prior_pos_list, gt_pos_list in valid_data_gen:
+    for net_input, _, batch, gt_pos_list in valid_data_gen:
         net_input = {k: v.tensor() for k, v in net_input.items()}
 
         gt_pos_list = paddle.to_tensor(np.vstack(gt_pos_list), dtype=paddle.float32)
-        prior_pos_list = paddle.to_tensor(np.vstack(prior_pos_list), dtype=paddle.float32)
+        # prior_pos_list = paddle.to_tensor(np.vstack(prior_pos_list), dtype=paddle.float32)
 
         net_input["batch"] = batch
-        # net_input["gt_poses"] = gt_pos_list
-        net_input["prior_poses"] = prior_pos_list
+        net_input["gt_pos_list"] = gt_pos_list
+        # net_input["prior_poses"] = prior_pos_list
 
         with paddle.no_grad():
-            _, pos_list = model(**net_input)
+            pos_list = model(**net_input, args=args)
         pred = pos_list[-1]
 
         batch_size = len(batch["mols"])
@@ -119,8 +122,10 @@ def evaluate(args, model, valid_data_gen, valid_num):
 
 
 def main(args):
+    prior_config = load_json_config(args.prior_config)
     encoder_config = load_json_config(args.encoder_config)
     decoder_config = load_json_config(args.decoder_config)
+    aux_config = load_json_config(args.aux_config)
     down_config = load_json_config(args.down_config)
 
     if args.dropout_rate is not None:
@@ -157,7 +162,7 @@ def main(args):
         atom_names=encoder_config['atom_names'],
         bond_names=encoder_config['bond_names'],
         bond_float_names=encoder_config['bond_float_names'],
-        # bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
+        bond_angle_float_names=encoder_config['bond_angle_float_names'],
         # dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names']
     )
 
@@ -165,36 +170,44 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         shuffle=False,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn
+    )
 
     valid_data_gen = valid_dataset.get_data_loader(
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         shuffle=False,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn
+    )
 
     test_data_gen = test_dataset.get_data_loader(
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         shuffle=False,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn
+    )
 
-    model = ConfGenModel(encoder_config=encoder_config, decoder_config=decoder_config, down_config=down_config,
-                         recycle=args.recycle)
+    model = ConfGenModel(
+        prior_config=prior_config, encoder_config=encoder_config,
+        decoder_config=decoder_config, down_config=down_config,
+        aux_config=aux_config, recycle=args.recycle, init_model=args.init_model
+    )
 
     model_params = model.parameters()
     # lrscheduler = WarmCosine(tmax=len(train_data_gen) * args.period, warmup=int(4e3))
     # scheduler = LambdaDecay(args.encoder_lr, lr_lambda=lambda x: lrscheduler.step(x))
     optimizer = paddle.optimizer.Adam(learning_rate=args.encoder_lr, parameters=model_params)
-    print('Total param num: %s' % (len(model.parameters())))
+
+    num_params = sum(p.numel() for p in model_params)
+    print(f"#Params: {num_params}")
 
     if args.distributed:
-        model = paddle.DataParallel(model)
+        model = paddle.DataParallel(model, find_unused_parameters=True)
 
     train_history = []
     for epoch in range(args.max_epoch):
         if not args.distributed or dist.get_rank() == 0:
-            print("\n=====Epoch {}".format(epoch))
+            print("\n=====Epoch {:0>3}".format(epoch))
             print(f"Training at 0 / {dist.get_world_size()}...")
         # loss_dict = train(args, model, encoder_opt, decoder_opt, head_opt, train_data_gen, train_num)
         loss_dict = train(args, model, optimizer, train_data_gen, train_num)
@@ -207,7 +220,7 @@ def main(args):
             print("Validating...")
             valid_rmsd = evaluate(args, model, valid_data_gen, valid_num)
             test_rmsd = evaluate(args, model, test_data_gen, test_num)
-            print(f"valid rmsd: {valid_rmsd}, test rmsd: {test_rmsd}")
+            print(f"[Epoch: {epoch:0>3}] valid rmsd: {valid_rmsd}, test rmsd: {test_rmsd}")
 
             # paddle.save(compound_encoder.state_dict(),
             #             '%s/epoch%d/compound_encoder.pdparams' % (args.model_dir, epoch_id))
@@ -229,9 +242,12 @@ def main_cli():
 
     parser.add_argument("--cached_data_path", type=str, default=None)
 
+    parser.add_argument("--prior_config", type=str)
     parser.add_argument("--encoder_config", type=str)
     parser.add_argument("--decoder_config", type=str)
     parser.add_argument("--down_config", type=str)
+    parser.add_argument("--aux_config", type=str)
+
     parser.add_argument("--init_model", type=str, default=None)
     parser.add_argument("--model_dir", type=str)
 
