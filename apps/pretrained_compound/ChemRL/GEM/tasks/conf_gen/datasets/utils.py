@@ -1,4 +1,6 @@
 import pickle
+from glob import glob
+from pathlib import Path
 
 import numpy as np
 import paddle
@@ -6,12 +8,15 @@ from rdkit import Chem
 import pgl
 from sklearn.metrics import pairwise_distances
 
-from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import scatter_mean, set_rdmol_positions
+import sys
+sys.path.append("../..")
+from tasks.conf_gen.utils import scatter_mean, set_rdmol_positions
+
+
 from pahelix.datasets.inmemory_dataset import InMemoryDataset
 from pahelix.featurizers.gem_featurizer import get_pretrain_bond_angle, get_pretrain_angle_dihedral
-from pahelix.utils import load_json_config
-from pahelix.utils.compound_tools import mol_to_geognn_graph_data_raw3d, mol_to_geognn_graph_data_MMFF3d, \
-    mol_to_geognn_graph_data
+# from pahelix.utils import load_json_config
+from pahelix.utils.compound_tools import mol_to_geognn_graph_data_raw3d
 
 
 def move2origin(poses, batch, num_nodes):
@@ -23,16 +28,40 @@ def move2origin(poses, batch, num_nodes):
     return poses - _poses_mean
 
 
-def load_pickled_mol_to_dataset(data_path: str):
-    with open(data_path, 'rb') as f:
-        mol_list = pickle.load(f)
-    return InMemoryDataset(data_list=mol_list)
+def load_pickled_mol_to_dataset(files):
+    data_list = []
+
+    for file in files:
+        with open(file, 'rb') as f:
+            mol_list = pickle.load(f)
+        data_list.extend(mol_list)
+
+    return InMemoryDataset(data_list=data_list)
 
 
-def load_sdf_mol_to_dataset(data_path: str):
-    mols = Chem.SDMolSupplier(data_path)
-    mol_list = [mol for mol in mols]
-    return InMemoryDataset(data_list=mol_list)
+def load_sdf_mol_to_dataset(files):
+    """tbd"""
+    data_list = []
+    for file in files:
+        mols = Chem.SDMolSupplier(file)
+        for mol in mols:
+            data_list.append(mol)
+    dataset = InMemoryDataset(data_list=data_list)
+    return dataset
+
+
+def load_mol_to_dataset(data_path: str, debug=False):
+    if debug:
+        files = sorted(glob('%s/*' % data_path))[:10]
+    else:
+        files = sorted(glob('%s/*' % data_path))
+
+    if Path(files[0]).suffix == '.pkl':
+        return load_pickled_mol_to_dataset(files)
+    if Path(files[0]).suffix == '.sdf':
+        return load_sdf_mol_to_dataset(files)
+
+    raise ValueError
 
 
 class ConfGenTaskTransformFn:
@@ -203,8 +232,11 @@ class ConfGenTaskCollateFn(object):
         atom_hirshfeld = []
         atom_npa = []
 
+        batch_list = []
+        num_nodes = []
+
         node_count = 0
-        for data in data_list:
+        for i, data in enumerate(data_list):
             N = len(data[self.atom_names[0]])
 
             if pretrain:
@@ -244,6 +276,10 @@ class ConfGenTaskCollateFn(object):
 
                 if 'npa' in self.pretrain_tasks:
                     atom_npa.append(data['atom_npa'])
+
+                n_atom = N
+                batch_list.extend([i] * n_atom)
+                num_nodes.append(n_atom)
 
                 continue
 
@@ -316,7 +352,11 @@ class ConfGenTaskCollateFn(object):
             if 'npa' in self.pretrain_tasks:
                 feed_dict['atom_npa'] = np.hstack(atom_npa).astype('float32')
 
-            return feed_dict
+            batch_list = np.array(batch_list)
+            num_nodes = np.array(num_nodes)
+            batch = dict(zip(["batch", "num_nodes"], [batch_list, num_nodes]))
+
+            return feed_dict, batch
 
         atom_bond_graph = pgl.Graph.batch(atom_bond_graph_list)
         self._flat_shapes(atom_bond_graph.node_feat)
@@ -350,6 +390,6 @@ class ConfGenTaskCollateFn(object):
         prior_graph = self.process_data(prior_data_list, only_atom_bond=True)
         encoder_graph = self.process_data(encoder_data_list, only_atom_bond=False)
         decoder_graph = self.process_data(decoder_data_list, only_atom_bond=True)
-        decoder_feed = self.process_data(decoder_gt_data_list, only_atom_bond=False, pretrain=True)
+        decoder_feed, batch = self.process_data(decoder_gt_data_list, only_atom_bond=False, pretrain=True)
 
-        return prior_graph, encoder_graph, decoder_graph, decoder_feed
+        return prior_graph, encoder_graph, decoder_graph, decoder_feed, batch
