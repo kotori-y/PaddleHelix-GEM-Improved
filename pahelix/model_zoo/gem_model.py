@@ -201,10 +201,14 @@ class GNNModel(nn.Layer):
 
         self.atom_names = model_config['atom_names']
         self.bond_names = model_config['bond_names']
+        self.bond_float_names = model_config['bond_float_names']
 
         self.init_atom_embedding = AtomEmbedding(self.atom_names, self.embed_dim)
+        self.init_bond_embedding = BondEmbedding(self.bond_names, self.embed_dim)
+        self.init_bond_float_rbf = BondFloatRBF(self.bond_float_names, self.embed_dim)
 
         self.bond_embedding_list = nn.LayerList()
+        self.bond_float_rbf_list = nn.LayerList()
 
         self.atom_bond_block_list = nn.LayerList()
 
@@ -212,6 +216,8 @@ class GNNModel(nn.Layer):
             self.bond_embedding_list.append(
                 BondEmbedding(self.bond_names, self.embed_dim)
             )
+            self.bond_float_rbf_list.append(
+                BondFloatRBF(self.bond_float_names, self.embed_dim))
             self.atom_bond_block_list.append(
                 GeoGNNBlock(self.embed_dim, self.dropout_rate, last_act=(layer_id != self.layer_num - 1))
             )
@@ -239,7 +245,8 @@ class GNNModel(nn.Layer):
         node_repr = self.init_atom_embedding(atom_bond_graph.node_feat)
 
         for layer_id in range(self.layer_num):
-            edge_repr = self.bond_embedding_list[layer_id](atom_bond_graph.edge_feat)
+            bond_embed = self.init_bond_embedding(atom_bond_graph.edge_feat)
+            edge_repr = bond_embed + self.init_bond_float_rbf(atom_bond_graph.edge_feat)
             node_repr = self.atom_bond_block_list[layer_id](
                 atom_bond_graph,
                 node_repr,

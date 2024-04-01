@@ -1,372 +1,315 @@
-import copy
-
-import numpy as np
 import paddle
 import paddle.nn as nn
-import pgl
-
-from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.loss.e3_loss import compute_loss
-from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import scatter_mean
-from pahelix.model_zoo.gem_model import GeoGNNModel, GNNModel
-from pahelix.networks.basic_block import MLP, MLPwoLastAct
-from pahelix.utils.compound_tools import mol_to_geognn_graph_data, mol_to_geognn_graph_data_MMFF3d, Compound3DKit
-
-from rdkit import Chem
-from rdkit.Chem import rdDepictor as DP
-from rdkit.Chem import AllChem
+# from rdkit.Chem import rdDepictor as DP
 from rdkit import RDLogger
+
+try:
+    from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.loss.e3_loss import alignment_loss
+    from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.model.layers import ConfPriorLayer, ConfEncoderLayer, \
+        ConfDecoderLayer
+except:
+    from conf_gen.loss.e3_loss import alignment_loss
+    from conf_gen.model.layers import ConfPriorLayer, ConfEncoderLayer, \
+        ConfDecoderLayer
+from pahelix.model_zoo.gem_model import GNNModel
+from pahelix.networks.basic_block import MLP
 
 RDLogger.DisableLog('rdApp.*')
 
 
+def get_bond_length(positions, feed_dict):
+    position_i = paddle.gather(positions, feed_dict['Bl_node_i'])
+    position_j = paddle.gather(positions, feed_dict['Bl_node_j'])
+
+    bond_length = paddle.norm(position_i - position_j, p=2, axis=1).unsqueeze(1)
+    return bond_length
+
+
+def updated_graph(graph, feed_dict, batch_dict, delta_positions, new_positions=None):
+    new_graph = graph.copy()
+
+    if new_positions is None:
+        new_positions = batch_dict["positions"] + delta_positions
+    new_bond_length = get_bond_length(new_positions, feed_dict)
+
+    atom_bond_graph = new_graph['atom_bond_graph']
+    atom_bond_graph.edge_feat['bond_length'] = new_bond_length.squeeze(1)
+
+    return new_graph, new_positions, new_bond_length
+
+
 class ConfPrior(nn.Layer):
-    def __init__(self, model: GNNModel, model_config):
+    def __init__(self, n_layers, prior_config, head_config):
         super().__init__()
-        self.model = model
-        self.prior_head = MLP(
-            layer_num=model_config['prior_head_layer_num'],
-            in_size=model.embed_dim,
-            hidden_size=model_config['prior_head_hidden_dim'],
-            out_size=model.embed_dim * 2,
-            act=model_config['act'],
-            dropout_rate=model_config['dropout_rate']
+
+        self.layers = nn.LayerList(
+            [
+                ConfPriorLayer(prior_config, head_config) for _ in range(n_layers)
+            ]
         )
 
-    def forward(self, prior_graph):
-        _, _, graph_repr = self.model(**prior_graph)
-        latent = self.prior_head(graph_repr)
-        mu_p, sigma_p = paddle.chunk(latent, chunks=2, axis=-1)
-        return mu_p, sigma_p
+    def forward(self, prior_graph, prior_feed, prior_batch):
+        prior_positions_list = []
+        prior_bond_length_list = []
+
+        for i, layer in enumerate(self.layers):
+            delta_positions = layer(prior_graph)
+
+            prior_graph, new_positions, new_bond_length = updated_graph(
+                prior_graph, prior_feed, prior_batch, delta_positions=delta_positions
+            )
+
+            prior_positions_list.append(new_positions)
+            prior_bond_length_list.append(new_bond_length)
+
+        return prior_positions_list, prior_bond_length_list
 
 
 class ConfEncoder(nn.Layer):
-    def __init__(self, model: GeoGNNModel, model_config):
+    def __init__(self, n_layers, encoder_config, head_config):
         super().__init__()
-        self.model = model
-        self.encoder_head = MLP(
-            layer_num=model_config['encoder_head_layer_num'],
-            in_size=model.embed_dim,
-            hidden_size=model_config['encoder_head_hidden_dim'],
-            out_size=model.embed_dim * 2,
-            act=model_config['act'],
-            dropout_rate=model_config['dropout_rate']
+
+        self.layers = nn.LayerList(
+            [
+                ConfEncoderLayer(encoder_config, head_config) for _ in range(n_layers)
+            ]
         )
 
-    def forward(self, encoder_graph):
-        _, _, graph_repr = self.model(**encoder_graph)
+        self.encoder_head = MLP(
+            layer_num=head_config['encoder_head_layer_num'],
+            in_size=encoder_config['embed_dim'],
+            hidden_size=head_config['encoder_head_hidden_dim'],
+            out_size=encoder_config['embed_dim'] * 2,
+            act=head_config['act'],
+            dropout_rate=head_config['dropout_rate']
+        )
+
+    def forward(self, encoder_graph, prior_feed, encoder_batch):
+        assert len(self.layers) >= 1
+
+        for i, layer in enumerate(self.layers):
+            delta_positions, graph_repr = layer(encoder_graph)
+
+            encoder_graph, _, _ = updated_graph(
+                encoder_graph, prior_feed, encoder_batch, delta_positions=delta_positions
+            )
+
         latent = self.encoder_head(graph_repr)
         mu_q, sigma_q = paddle.chunk(latent, chunks=2, axis=-1)
         return mu_q, sigma_q
 
 
 class ConfDecoder(nn.Layer):
-    def __init__(self, model: GNNModel, model_config):
+    def __init__(self, n_layers, decoder_config, head_config):
         super().__init__()
-        self.model = model
 
-        self.layer_num = model_config['decoder_head_layer_num']
-        self.hidden_dim = model_config['decoder_head_hidden_dim']
-        self.act = model_config['act']
-        self.dropout_rate = model_config['dropout_rate']
-        self.pretrain_tasks = model_config['pretrain_tasks']
+        self.layers = nn.LayerList(
+            [
+                ConfDecoderLayer(decoder_config, head_config) for _ in range(n_layers)
+            ]
+        )
 
-        # bond angle with regression
-        if 'Bar' in self.pretrain_tasks:
-            self.Bar_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim * 3,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
+    def forward(self, decoder_graph, prior_feed, decoder_batch, latent):
+        decoder_positions_list = []
+        decoder_bond_length_list = []
+
+        for i, layer in enumerate(self.layers):
+            delta_positions = layer(decoder_graph, decoder_batch, latent)
+
+            prior_graph, new_positions, new_bond_length = updated_graph(
+                decoder_graph, prior_feed, decoder_batch, delta_positions=delta_positions
             )
-            # self.Bar_loss = nn.SmoothL1Loss()
-        # dihedral angle with regression
-        if 'Dir' in self.pretrain_tasks:
-            self.Dir_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim * 4,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.Dir_loss = nn.SmoothL1Loss()
-        # bond length with regression
-        if 'Blr' in self.pretrain_tasks:
-            self.Blr_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.graph_dim * 2,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.Blr_loss = nn.SmoothL1Loss()
-        # atom distance with classification
-        if 'Adc' in self.pretrain_tasks:
-            self.Adc_vocab = model_config['Adc_vocab']
-            self.Adc_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim * 2,
-                hidden_size=self.hidden_dim,
-                out_size=self.Adc_vocab + 3,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.Adc_loss = nn.CrossEntropyLoss()
 
-        # cm5 charge prediction
-        if 'cm5' in self.pretrain_tasks:
-            self.cm5_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.cm5_loss = nn.SmoothL1Loss()
-        # espc charge prediction
-        if 'espc' in self.pretrain_tasks:
-            self.espc_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.espc_loss = nn.SmoothL1Loss()
-        # hirshfeld charge prediction
-        if 'hirshfeld' in self.pretrain_tasks:
-            self.hirshfeld_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.hirshfeld_loss = nn.SmoothL1Loss()
-        # npa charge prediction
-        if 'npa' in self.pretrain_tasks:
-            self.npa_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.npa_loss = nn.SmoothL1Loss()
-        # bond order with regression
-        if 'wiberg' in self.pretrain_tasks:
-            self.bo_mlp = MLP(
-                layer_num=self.layer_num,
-                in_size=model.embed_dim * 2,
-                hidden_size=self.hidden_dim,
-                out_size=1,
-                act=self.act,
-                dropout_rate=self.dropout_rate
-            )
-            # self.bo_loss = nn.SmoothL1Loss()
+            decoder_positions_list.append(new_positions)
+            decoder_bond_length_list.append(new_bond_length)
 
-        self.latent_emb = nn.Linear(model.embed_dim, model.embed_dim)
-
-    def _get_Bar(self, feed_dict, node_repr):
-        node_i_repr = paddle.gather(node_repr, feed_dict['Ba_node_i'])
-        node_j_repr = paddle.gather(node_repr, feed_dict['Ba_node_j'])
-        node_k_repr = paddle.gather(node_repr, feed_dict['Ba_node_k'])
-        node_ijk_repr = paddle.concat([node_i_repr, node_j_repr, node_k_repr], 1)
-        return self.Bar_mlp(node_ijk_repr)
-
-    def _get_Dir(self, feed_dict, node_repr):
-        node_a_repr = paddle.gather(node_repr, feed_dict['Adi_node_a'])
-        node_b_repr = paddle.gather(node_repr, feed_dict['Adi_node_b'])
-        node_c_repr = paddle.gather(node_repr, feed_dict['Adi_node_c'])
-        node_d_repr = paddle.gather(node_repr, feed_dict['Adi_node_d'])
-        node_abcd_repr = paddle.concat([node_a_repr, node_b_repr, node_c_repr, node_d_repr], 1)
-        return self.Dir_mlp(node_abcd_repr)
-
-    def _get_Blr(self, feed_dict, node_repr):
-        node_i_repr = paddle.gather(node_repr, feed_dict['Bl_node_i'])
-        node_j_repr = paddle.gather(node_repr, feed_dict['Bl_node_j'])
-        node_ij_repr = paddle.concat([node_i_repr, node_j_repr], 1)
-        return self.Blr_mlp(node_ij_repr)
-
-    def _get_Adc(self, feed_dict, node_repr):
-        node_i_repr = paddle.gather(node_repr, feed_dict['Ad_node_i'])
-        node_j_repr = paddle.gather(node_repr, feed_dict['Ad_node_j'])
-        node_ij_repr = paddle.concat([node_i_repr, node_j_repr], 1)
-        return self.Adc_mlp(node_ij_repr)
-
-    def _get_cm5(self, node_repr):
-        return self.cm5_mlp(node_repr)
-
-    def _get_espc(self, node_repr):
-        return self.espc_mlp(node_repr)
-
-    def _get_hirshfeld(self, node_repr):
-        return self.hirshfeld_mlp(node_repr)
-
-    def _get_npa(self, node_repr):
-        return self.npa_mlp(node_repr)
-
-    def _get_bo(self, feed_dict, node_repr):
-        node_i_repr = paddle.gather(node_repr, feed_dict['Bl_node_i'])
-        node_j_repr = paddle.gather(node_repr, feed_dict['Bl_node_j'])
-        node_ij_repr = paddle.concat([node_i_repr, node_j_repr], 1)
-        return self.bo_mlp(node_ij_repr)
-
-    def forward(self, decoder_graph, decoder_feed, latent, batch):
-        node_repr, _, _ = self.model(**decoder_graph)
-
-        latent = self.latent_emb(latent)
-        latent = paddle.to_tensor(np.repeat(latent.numpy(), batch["num_nodes"], axis=0))
-
-        node_repr = paddle.add(node_repr, latent)
-
-        ans = {}
-
-        if 'Bar' in self.pretrain_tasks:
-            ans['Bar'] = self._get_Bar(decoder_feed, node_repr)
-        if 'Dir' in self.pretrain_tasks:
-            ans['Dir'] = self._get_Dir(decoder_feed, node_repr)
-        if 'Blr' in self.pretrain_tasks:
-            ans['Blr'] = self._get_Blr(decoder_feed, node_repr)
-        if 'Adc' in self.pretrain_tasks:
-            ans['Adc'] = self._get_Adc(decoder_feed, node_repr)
-        if 'cm5' in self.pretrain_tasks:
-            ans['cm5'] = self._get_cm5(node_repr)
-        if 'espc' in self.pretrain_tasks:
-            ans['espc'] = self._get_espc(node_repr)
-        if 'hirshfeld' in self.pretrain_tasks:
-            ans['hirshfeld'] = self._get_hirshfeld(node_repr)
-        if 'npa' in self.pretrain_tasks:
-            ans['npa'] = self._get_npa(node_repr)
-        if 'wiberg' in self.pretrain_tasks:
-            ans['wiberg'] = self._get_bo(decoder_feed, node_repr)
-
-        return ans
+        return decoder_positions_list, decoder_bond_length_list
 
 
 class VAE(nn.Layer):
-    def __init__(self, prior: GNNModel, encoder: GeoGNNModel, decoder: GNNModel, head_config, vae_beta=1.0):
+    def __init__(
+            self,
+            prior_config,
+            encoder_config,
+            decoder_config,
+            head_config,
+            n_layers,
+            vae_beta=1.0,
+            aux_weight=1.0
+    ):
         super().__init__()
 
-        assert prior.embed_dim == encoder.embed_dim
-        head_config['embed_dim'] = prior.embed_dim
+        # assert prior.embed_dim == encoder.embed_dim
+        # head_config['embed_dim'] = prior.embed_dim
         self.vae_beta = vae_beta
+        self.aux_weight = aux_weight
 
         # p(z | G)
-        self.prior = ConfPrior(prior, head_config)
+        self.prior = ConfPrior(n_layers, prior_config, head_config)
 
         # q(z | G', H', I')
-        self.encoder = ConfEncoder(encoder, head_config)
+        self.encoder = ConfEncoder(n_layers, encoder_config, head_config)
 
         # p(G, H, I | G', z)
-        self.decoder = ConfDecoder(decoder, head_config)
+        self.decoder = ConfDecoder(n_layers, decoder_config, head_config)
 
-        self.pretrain_tasks = head_config['pretrain_tasks']
-        self.Adc_vocab = head_config['Adc_vocab']
+        # self.Bar_loss = nn.SmoothL1Loss()
+        # self.Dir_loss = nn.SmoothL1Loss()
+        self.bond_length_loss = nn.SmoothL1Loss()
 
-        # bond angle with regression
-        if 'Bar' in self.pretrain_tasks:
-            self.Bar_loss = nn.SmoothL1Loss()
-        # dihedral angle with regression
-        if 'Dir' in self.pretrain_tasks:
-            self.Dir_loss = nn.SmoothL1Loss()
-        # bond length with regression
-        if 'Blr' in self.pretrain_tasks:
-            self.Blr_loss = nn.SmoothL1Loss()
-        # atom distance with classification
-        if 'Adc' in self.pretrain_tasks:
-            self.Adc_loss = nn.CrossEntropyLoss()
+    def forward(
+            self,
+            prior_graph, encoder_graph, decoder_graph,
+            prior_feed, encoder_feed, decoder_feed,
+            prior_batch, encoder_batch, decoder_batch,
+            evaluate=False
+    ):
+        extra_output = {
+            "n_mols": prior_batch["num_nodes"].shape[0]
+        }
 
-        # cm5 charge prediction
-        if 'cm5' in self.pretrain_tasks:
-            self.cm5_loss = nn.SmoothL1Loss()
-        # espc charge prediction
-        if 'espc' in self.pretrain_tasks:
-            self.espc_loss = nn.SmoothL1Loss()
-        # hirshfeld charge prediction
-        if 'hirshfeld' in self.pretrain_tasks:
-            self.hirshfeld_loss = nn.SmoothL1Loss()
-        # npa charge prediction
-        if 'npa' in self.pretrain_tasks:
-            self.npa_loss = nn.SmoothL1Loss()
-        # bond order with regression
-        if 'wiberg' in self.pretrain_tasks:
-            self.bo_loss = nn.SmoothL1Loss()
+        # 'Ba_bond_angle', 'Adi_angle_dihedral'
+        if not evaluate:
+            extra_output["gt_positions"] = encoder_batch["positions"]
+            extra_output["gt_bond_length"] = encoder_feed["Bl_bond_length"]
 
-    def forward(self, prior_graph, encoder_graph, decoder_graph, decoder_feed, batch):
-        mu_p, sigma_p = self.prior(prior_graph)
-        mu_q, sigma_q = self.encoder(encoder_graph)
+        prior_positions_list, prior_bond_length_list = self.prior(prior_graph, prior_feed, prior_batch)
+        extra_output["prior_positions_list"] = prior_positions_list
+        extra_output["prior_bond_length_list"] = prior_bond_length_list
+        extra_output["batch_dict"] = prior_batch
 
-        latent = self.reparameterize_gaussian(mu_q, sigma_q)
+        mu, sigma = self.encoder(encoder_graph, prior_feed, encoder_batch)
+        latent = self.reparameterize_gaussian(mu, sigma)
+        extra_output["latent_mean"] = mu
+        extra_output["latent_logstd"] = sigma
 
-        geometry_dict = self.decoder(decoder_graph, decoder_feed, latent, batch)
-        loss, sub_losses = self.compute_geometry_loss(geometry_dict, decoder_feed)
-        # KL Distance
-        loss_kl = self.compute_vae_kl(mu_q, sigma_q, mu_p, sigma_p)
+        decoder_graph, _, _ = updated_graph(
+            decoder_graph, prior_feed, decoder_batch,
+            delta_positions=None, new_positions=prior_positions_list[-1]
+        )
+        decoder_positions_list, decoder_bond_length_list = self.decoder(
+            decoder_graph, prior_feed, decoder_batch, latent
+        )
+        extra_output["decoder_bond_length_list"] = decoder_bond_length_list
 
-        loss += (loss_kl * self.vae_beta)
-        sub_losses['kl_loss'] = loss_kl
-        sub_losses['loss'] = loss
+        loss, loss_dict = self.compute_loss(decoder_positions_list, extra_output)
 
-        for name in sub_losses:
-            sub_losses[name] = sub_losses[name].numpy().mean()
+        return loss, loss_dict, decoder_positions_list
 
-        return loss, sub_losses
-
-    @staticmethod
-    def compute_vae_kl(mu_q, logvar_q, mu_prior, logvar_prior):
-        mu1 = mu_q
-        std1 = paddle.exp(0.5 * logvar_q)
-        mu2 = mu_prior
-        std2 = paddle.exp(0.5 * logvar_prior)
-        kl = - 0.5 + paddle.log(std2 / (std1 + 1e-8) + 1e-8) + \
-             ((paddle.pow(std1, 2) + paddle.pow(mu1 - mu2, 2)) / (2 * paddle.pow(std2, 2)))
-
-        bs = kl.shape[0]
-        kl = kl.sum() / bs
-
-        return kl
-
-    def compute_geometry_loss(self, geometry_dict, feed_dict):
-        sub_losses = {}
-
-        if 'Bar' in self.pretrain_tasks:
-            sub_losses['Bar_loss'] = self.Bar_loss(geometry_dict['Bar'], feed_dict['Ba_bond_angle'])
-        if 'Dir' in self.pretrain_tasks:
-            sub_losses['Dir_loss'] = self.Dir_loss(geometry_dict['Dir'], feed_dict['Adi_angle_dihedral'])
-        if 'Blr' in self.pretrain_tasks:
-            sub_losses['Blr_loss'] = self.Blr_loss(geometry_dict['Blr'], feed_dict['Bl_bond_length'])
-        if 'Adc' in self.pretrain_tasks:
-            logits = geometry_dict['Adc']
-            atom_dist = paddle.clip(feed_dict['Ad_atom_dist'], 0.0, 20.0)
-            atom_dist_id = paddle.cast(atom_dist / 20.0 * self.Adc_vocab, 'int64')
-            sub_losses['Adc_loss'] = self.Adc_loss(logits, atom_dist_id)
-        if 'cm5' in self.pretrain_tasks:
-            sub_losses['cm5_loss'] = self.cm5_loss(geometry_dict['cm5'], feed_dict['atom_cm5'].unsqueeze(1))
-        if 'espc' in self.pretrain_tasks:
-            sub_losses['espc_loss'] = self.espc_loss(geometry_dict['espc'], feed_dict['atom_espc'].unsqueeze(1))
-        if 'hirshfeld' in self.pretrain_tasks:
-            sub_losses['hirshfeld_loss'] = self.hirshfeld_loss(geometry_dict['hirshfeld'], feed_dict['atom_hirshfeld'].unsqueeze(1))
-        if 'npa' in self.decoder.pretrain_tasks:
-            sub_losses['npa_loss'] = self.npa_loss(geometry_dict['npa'], feed_dict['atom_npa'].unsqueeze(1))
-        if 'wiberg' in self.decoder.pretrain_tasks:
-            sub_losses['bo_loss'] = self.bo_loss(geometry_dict['wiberg'], feed_dict['bo_bond_order'])
-
+    def compute_loss(self, decoder_positions_list, extra_output):
+        loss_dict = {}
         loss = 0
-        for name in sub_losses:
-            loss += sub_losses[name]
 
-        return loss, sub_losses
+        # kld loss
+        mean = extra_output["latent_mean"]
+        log_std = extra_output["latent_logstd"]
+        kld = -0.5 * paddle.sum(1 + 2 * log_std - mean.pow(2) - paddle.exp(2 * log_std), axis=-1)
+        kld = kld.mean()  # todo check this line
+        loss = loss + kld * self.vae_beta
+        loss_dict["loss_kld"] = kld.numpy()[0]
+
+        # new_idx = self.update_iso(pos, pos_list[-1], batch)
+
+        # prior positions loss
+        loss_tmp, _ = alignment_loss(
+            extra_output["gt_positions"], extra_output["prior_positions_list"][-1], extra_output["batch_dict"]
+        )
+        loss += loss_tmp * 2  # todo
+        loss_dict["loss_prior_position"] = loss_tmp.numpy()[0]
+
+        # decoder positions loss
+        for i, position in enumerate(decoder_positions_list):
+            loss_tmp, _ = alignment_loss(extra_output["gt_positions"], position, extra_output["batch_dict"])
+            loss += loss_tmp * (1.0 if i == 0 else self.aux_weight)
+            loss_dict[f"loss_pos_{i}"] = loss_tmp.numpy()[0]
+
+        # geometry loss
+        _loss, _loss_dict = self.compute_geometry_loss(extra_output)
+        loss += _loss
+        loss_dict = {**loss_dict, **_loss_dict}
+
+        # for task in ['bond_length', 'bond_angle']:
+        #     positions = self.decoder(decoder_graph, decoder_feed, latent, batch)
+        #     sub_losses[f"{task}_loss"] = self.compute_geometry_loss(positions, decoder_feed, pretrain_task=task)
+        #     self.update_decoder_graph(decoder_graph, positions)
+        # # KL Distance
+        # loss_kl = self.compute_vae_kl(mu_q, sigma_q, mu_p, sigma_p)
+        #
+        # loss += (loss_kl * self.vae_beta)
+        # sub_losses['kl_loss'] = loss_kl
+        # sub_losses['loss'] = loss
+        #
+        # for name in sub_losses:
+        #     sub_losses[name] = sub_losses[name].numpy().mean()
+        return loss, loss_dict
+
+    def compute_geometry_loss(self, extra_output):
+        loss = 0
+        loss_dict = {}
+
+        blr_loss = nn.SmoothL1Loss()
+
+        loss_tmp = blr_loss(
+            extra_output["prior_bond_length_list"][-1], extra_output["gt_bond_length"]
+        )
+        loss += loss_tmp * 20  # todo
+        loss_dict[f"loss_prior_bond_length"] = loss_tmp.numpy()[0]
+
+        for i, bond_length in enumerate(extra_output["decoder_bond_length_list"]):
+            loss_tmp = blr_loss(bond_length, extra_output["gt_bond_length"])
+            weight = 10  # todo
+
+            loss += loss_tmp * weight
+            loss_dict[f"loss_decoder_bond_length_{i}"] = loss_tmp.numpy()[0]
+
+        return loss, loss_dict
+
+        # if 'Bar' in pretrain_tasks:
+        #     sub_losses['Bar_loss'] = self.Bar_loss(geometry_dict['Bar'], feed_dict['Ba_bond_angle'])
+        # if 'Dir' in self.pretrain_tasks:
+        #     sub_losses['Dir_loss'] = self.Dir_loss(geometry_dict['Dir'], feed_dict['Adi_angle_dihedral'])
 
     @staticmethod
     def reparameterize_gaussian(mean, logvar):
         std = paddle.exp(0.5 * logvar)
         eps = paddle.randn(std.shape)
         return mean + std * eps
+
+    @staticmethod
+    def update_iso(pos_y, pos_x, batch):
+        with paddle.no_grad():
+            pre_nodes = 0
+            num_nodes = batch.n_nodes
+            isomorphisms = batch.isomorphisms
+            new_idx_x = []
+            for i in range(batch.num_graphs):
+                cur_num_nodes = num_nodes[i]
+                current_isomorphisms = [
+                    torch.LongTensor(iso).to(pos_x.device) for iso in isomorphisms[i]
+                ]
+                if len(current_isomorphisms) == 1:
+                    new_idx_x.append(current_isomorphisms[0] + pre_nodes)
+                else:
+                    pos_y_i = pos_y[pre_nodes: pre_nodes + cur_num_nodes]
+                    pos_x_i = pos_x[pre_nodes: pre_nodes + cur_num_nodes]
+                    pos_y_mean = torch.mean(pos_y_i, dim=0, keepdim=True)
+                    pos_x_mean = torch.mean(pos_x_i, dim=0, keepdim=True)
+                    pos_x_list = []
+
+                    for iso in current_isomorphisms:
+                        pos_x_list.append(torch.index_select(pos_x_i, 0, iso))
+                    total_iso = len(pos_x_list)
+                    pos_y_i = pos_y_i.repeat(total_iso, 1)
+                    pos_x_i = torch.cat(pos_x_list, dim=0)
+                    min_idx = GNN.alignment_loss_iso_onegraph(
+                        pos_y_i,
+                        pos_x_i,
+                        pos_y_mean,
+                        pos_x_mean,
+                        num_nodes=cur_num_nodes,
+                        total_iso=total_iso,
+                    )
+                    new_idx_x.append(current_isomorphisms[min_idx.item()] + pre_nodes)
+                pre_nodes += cur_num_nodes
+
+            return torch.cat(new_idx_x, dim=0)

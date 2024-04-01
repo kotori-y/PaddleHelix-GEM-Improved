@@ -3,7 +3,10 @@ import copy
 import numpy as np
 import paddle
 import paddle.nn.functional as F
-from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import scatter_mean, set_rdmol_positions
+try:
+    from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import scatter_mean, set_rdmol_positions
+except:
+    from conf_gen.utils import scatter_mean, set_rdmol_positions
 import multiprocessing as mp
 from rdkit.Chem.AllChem import AlignMol
 import paddle.nn as nn
@@ -51,35 +54,24 @@ def rmsd_loss(pos, batch):
 
 
 def compute_loss(extra_output, feed_dict, gt_pos, pos_list, batch, args):
-    bar_loss = nn.SmoothL1Loss()
-    blr_loss = nn.SmoothL1Loss()
+    # bar_loss = nn.SmoothL1Loss()
+    # blr_loss = nn.SmoothL1Loss()
 
     loss_dict = {}
     loss = 0
 
-    # pos = pos_list[-1]
-    # loss_last = rmsd_loss(pos, batch)
-    # loss_dict["loss_pos_last"] = loss_last.numpy()[0]
+    loss_tmp, _ = alignment_loss(
+        gt_pos, extra_output["prior_pos_list"][-1], batch
+    )
+    loss = loss + loss_tmp
+    loss_dict["loss_prior_pos"] = loss_tmp.numpy()[0]
 
-    # loss_tmp, _ = alignment_loss(
-    #     gt_pos, extra_output["encoder_pos"], batch
-    # )
-    # loss = loss + loss_tmp
-    # loss_dict["loss_enc_pos"] = loss_tmp.numpy()[0]
-
-    mu_q, sigma_q = extra_output["prior_latent_mean"], extra_output["prior_latent_logstd"]
-    mu_p, sigma_p = extra_output["latent_mean"], extra_output["latent_logstd"]
-    loss_kl = compute_vae_kl(mu_q, sigma_q, mu_p, sigma_p).sum() / len(batch["mols"])
-    # loss_kl = loss_kl.mean()
-    loss_dict["loss_kld"] = loss_kl.numpy()[0]
-    loss = loss + loss_kl * args.vae_beta
-
-    loss_bar = bar_loss(extra_output['bar_list'], feed_dict['Ba_bond_angle'] / np.pi)
-    loss_blr = blr_loss(extra_output['blr_list'], feed_dict['Bl_bond_length'])
-    loss += (loss_bar + loss_blr)
-
-    loss_dict["loss_bar_last"] = loss_bar.numpy()[0]
-    loss_dict["loss_blr_last"] = loss_blr.numpy()[0]
+    mean = extra_output["latent_mean"]
+    log_std = extra_output["latent_logstd"]
+    kld = -0.5 * paddle.sum(1 + 2 * log_std - mean.pow(2) - paddle.exp(2 * log_std), axis=-1)
+    kld = kld.sum() / len(batch["mols"])
+    loss = loss + kld * args.vae_beta
+    loss_dict["loss_kld"] = kld.numpy()[0]
 
     loss_tmp, _ = alignment_loss(
         gt_pos, pos_list[-1], batch
@@ -93,16 +85,22 @@ def compute_loss(extra_output, feed_dict, gt_pos, pos_list, batch, args):
             loss = loss + _loss_tmp * (args.aux_loss if i < len(pos_list) else 1.0)
             loss_dict[f"loss_pos_{i}"] = _loss_tmp.numpy()[0]
 
-        # assert len(aux_dict['bar_list']) == len(aux_dict['blr_list'])
-        # for i in range(len(aux_dict['bar_list']) - 1):
-        #     _loss_bar = bar_loss(aux_dict['bar_list'][i], feed_dict['Ba_bond_angle'] / np.pi)
-        #     _loss_blr = blr_loss(aux_dict['blr_list'][i], feed_dict['Bl_bond_length'])
-        #
-        #     loss = loss + _loss_bar * (args.aux_loss if i < len(pos_list) else 1.0)
-        #     loss = loss + _loss_blr * (args.aux_loss if i < len(pos_list) else 1.0)
-        #
-        #     loss_dict[f"loss_bar_{i}"] = _loss_bar.numpy()[0]
-        #     loss_dict[f"loss_blr_{i}"] = _loss_blr.numpy()[0]
+    # loss_bar = bar_loss(extra_output['bar_list'], feed_dict['Ba_bond_angle'] / np.pi)
+    # loss_blr = blr_loss(extra_output['blr_list'], feed_dict['Bl_bond_length'])
+    # loss += (loss_bar + loss_blr)
+    # loss_dict["loss_bar_last"] = loss_bar.numpy()[0]
+    # loss_dict["loss_blr_last"] = loss_blr.numpy()[0]
+
+    # assert len(aux_dict['bar_list']) == len(aux_dict['blr_list'])
+    # for i in range(len(aux_dict['bar_list']) - 1):
+    #     _loss_bar = bar_loss(aux_dict['bar_list'][i], feed_dict['Ba_bond_angle'] / np.pi)
+    #     _loss_blr = blr_loss(aux_dict['blr_list'][i], feed_dict['Bl_bond_length'])
+    #
+    #     loss = loss + _loss_bar * (args.aux_loss if i < len(pos_list) else 1.0)
+    #     loss = loss + _loss_blr * (args.aux_loss if i < len(pos_list) else 1.0)
+    #
+    #     loss_dict[f"loss_bar_{i}"] = _loss_bar.numpy()[0]
+    #     loss_dict[f"loss_blr_{i}"] = _loss_blr.numpy()[0]
 
     # if args.ang_lam > 0 or args.bond_lam > 0:
     #     bond_loss, angle_loss = aux_loss(gt_pos, pos_list[-1], batch)
@@ -147,7 +145,7 @@ def alignment_loss(pos_y, pos_x, batch, clamp=None):
     with paddle.no_grad():
         num_nodes = batch["num_nodes"]
         total_nodes = pos_y.shape[0]
-        num_graphs = len(batch["mols"])
+        num_graphs = num_nodes.shape[0]
 
         y, pos_y_mean = move2origin(pos_y, batch["batch"], num_nodes)
         x, pos_x_mean = move2origin(pos_x, batch["batch"], num_nodes)

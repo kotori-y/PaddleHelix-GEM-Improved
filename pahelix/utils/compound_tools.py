@@ -24,6 +24,11 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolTransforms, rdchem
 
+try:
+    from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.loss.gt import isomorphic_core
+except ImportError:
+    ...
+
 from pahelix.utils.compound_constants import DAY_LIGHT_FG_SMARTS_LIST
 
 
@@ -714,7 +719,7 @@ def mol_to_graph_data(mol):
     return data
 
 
-def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, only_atom_bond=False):
+def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, only_atom_bond=False, isomorphic=False):
     """
     mol: rdkit molecule
     dir_type: direction type for bond_angle grpah
@@ -724,7 +729,11 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, onl
 
     data = mol_to_graph_data(mol)
 
+    if isomorphic:
+        data['isomorphic'] = isomorphic_core(mol)
+
     data['atom_pos'] = np.array(atom_poses, 'float32')
+    data['bond_length'] = Compound3DKit.get_bond_lengths(data['edges'], data['atom_pos'])
 
     if shuffle_coord:
         data['atom_pos'] += np.random.uniform(0, 0.5, data['atom_pos'].shape)
@@ -732,7 +741,6 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, onl
     if only_atom_bond:
         return data
 
-    data['bond_length'] = Compound3DKit.get_bond_lengths(data['edges'], data['atom_pos'])
     BondAngleGraph_edges, bond_angles, bond_angle_dirs = \
             Compound3DKit.get_superedge_angles(data['edges'], data['atom_pos'])
     data['BondAngleGraph_edges'] = BondAngleGraph_edges
@@ -772,11 +780,12 @@ def mol_to_geognn_graph_data_MMFF3d(mol, only_atom_bond=False):
     return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT', only_atom_bond=only_atom_bond)
 
 
-def mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False, only_atom_bond=False):
+def mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False, only_atom_bond=False, isomorphic=False):
     """tbd"""
     atom_poses = Compound3DKit.get_atom_poses(mol, mol.GetConformer())
     return mol_to_geognn_graph_data(
-        mol, atom_poses, dir_type='HT', shuffle_coord=shuffle_coord, only_atom_bond=only_atom_bond
+        mol, atom_poses, dir_type='HT', shuffle_coord=shuffle_coord,
+        only_atom_bond=only_atom_bond, isomorphic=isomorphic
     )
 
 
