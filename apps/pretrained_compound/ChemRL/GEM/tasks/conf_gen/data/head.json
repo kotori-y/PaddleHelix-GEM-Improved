@@ -1,0 +1,19 @@
+{
+    "prior_head_layer_num": 2,
+    "encoder_head_layer_num": 2,
+    "decoder_head_layer_num": 2,
+
+    "prior_head_hidden_dim": 256,
+    "encoder_head_hidden_dim": 256,
+    "decoder_head_hidden_dim": 256,
+
+    "dropout_rate": 0.2,
+    "act": "leaky_relu",
+    "pretrain_tasks": ["Bar", "Blr", "Dir", "Adc", "cm5", "espc", "hirshfeld", "npa", "wiberg"],
+    "Cm_vocab": 2400,
+    "Bar_vocab": 30,
+    "Blr_vocab": 30,
+    "Adc_vocab": 30,
+    "mask_ratio": 0.15,
+    "Fg_size": 494
+}

@@ -1,0 +1,7 @@
+{
+    "layer_num": 3,
+    "hidden_dim": 128,
+    "embed_dim": 64,
+    "dropout_rate": 0.2,
+    "act": "leaky_relu"
+}
