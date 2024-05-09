@@ -47,7 +47,7 @@ class ConfEncoderLayer(nn.Layer):
 class ConfDecoderLayer(nn.Layer):
     def __init__(self, decoder_config, head_config):
         super().__init__()
-        self.decode_model = GNNModel(decoder_config)
+        self.decode_model = GeoGNNModel(decoder_config)
         self.pos_layer = MLP(
             layer_num=head_config['prior_head_layer_num'],
             in_size=decoder_config['embed_dim'],

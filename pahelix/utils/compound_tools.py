@@ -719,7 +719,7 @@ def mol_to_graph_data(mol):
     return data
 
 
-def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, only_atom_bond=False, isomorphic=False):
+def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, only_atom_bond=False, isomorphism=False):
     """
     mol: rdkit molecule
     dir_type: direction type for bond_angle grpah
@@ -729,8 +729,8 @@ def mol_to_geognn_graph_data(mol, atom_poses, dir_type, shuffle_coord=False, onl
 
     data = mol_to_graph_data(mol)
 
-    if isomorphic:
-        data['isomorphic'] = isomorphic_core(mol)
+    if isomorphism:
+        data['isomorphism'] = isomorphic_core(mol)
 
     data['atom_pos'] = np.array(atom_poses, 'float32')
     data['bond_length'] = Compound3DKit.get_bond_lengths(data['edges'], data['atom_pos'])
@@ -780,14 +780,13 @@ def mol_to_geognn_graph_data_MMFF3d(mol, only_atom_bond=False):
     return mol_to_geognn_graph_data(mol, atom_poses, dir_type='HT', only_atom_bond=only_atom_bond)
 
 
-def mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False, only_atom_bond=False, isomorphic=False):
+def mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False, only_atom_bond=False, isomorphism=False):
     """tbd"""
     atom_poses = Compound3DKit.get_atom_poses(mol, mol.GetConformer())
     return mol_to_geognn_graph_data(
         mol, atom_poses, dir_type='HT', shuffle_coord=shuffle_coord,
-        only_atom_bond=only_atom_bond, isomorphic=isomorphic
+        only_atom_bond=only_atom_bond, isomorphism=isomorphism
     )
-
 
 
 if __name__ == "__main__":

@@ -67,12 +67,13 @@ def load_mol_to_dataset(data_path: str, debug=False):
 class ConfGenTaskTransformFn:
     """Gen features for downstream model"""
 
-    def __init__(self, noise=None, n_noise_mol=10, evaluate=False):
+    def __init__(self, noise=None, n_noise_mol=10, evaluate=False, isomorphism=False):
         if noise is None:
             noise = [0, 0.5]
         self.n_noise_mol = n_noise_mol
         self.noise = noise
         self.evaluate = evaluate
+        self.isomorphism = isomorphism
 
     def prepare_pretrain_task(self, data, only_atom_bond):
         """
@@ -117,7 +118,6 @@ class ConfGenTaskTransformFn:
         prior_pos_list = [np.random.uniform(-1, 1, size=(n_atoms, 3)) for _ in range(self.n_noise_mol)]
         encoder_pos_list = [gt_pos + np.random.uniform(*self.noise, size=(n_atoms, 3)) for _ in range(self.n_noise_mol)]
         decoder_pos = gt_pos
-        mol_list = [mol for _ in range(self.n_noise_mol)]
         # decoder_pos = prior_pos_list
 
         smiles = Chem.MolToSmiles(mol)
@@ -133,8 +133,8 @@ class ConfGenTaskTransformFn:
 
         decoder_data_list = [
             self.prepare_pretrain_task(
-                mol_to_geognn_graph_data_raw3d(set_rdmol_positions(mol, decoder_pos), only_atom_bond=True),
-                only_atom_bond=True
+                mol_to_geognn_graph_data_raw3d(set_rdmol_positions(mol, decoder_pos), only_atom_bond=False),
+                only_atom_bond=False
             )
             for _ in range(self.n_noise_mol)
         ]
@@ -144,13 +144,17 @@ class ConfGenTaskTransformFn:
 
         encoder_data_list = [
             self.prepare_pretrain_task(
-                mol_to_geognn_graph_data_raw3d(set_rdmol_positions(mol, pos), only_atom_bond=False, isomorphic=False),
+                mol_to_geognn_graph_data_raw3d(
+                    set_rdmol_positions(mol, pos), only_atom_bond=False, isomorphism=self.isomorphism
+                ),
                 only_atom_bond=False
             )
             for pos in encoder_pos_list
         ]
 
-        return prior_data_list, encoder_data_list, decoder_data_list
+        mol_list = [mol for _ in range(self.n_noise_mol)]
+
+        return prior_data_list, encoder_data_list, decoder_data_list, mol_list
 
 
 class ConfGenTaskCollateFn:
@@ -162,7 +166,7 @@ class ConfGenTaskCollateFn:
             bond_angle_float_names,
             dihedral_angle_float_names,
             evaluate=False,
-            isomorphic=False
+            isomorphism=False
          ):
         self.atom_names = atom_names
         self.bond_names = bond_names
@@ -171,7 +175,7 @@ class ConfGenTaskCollateFn:
         self.dihedral_angle_float_names = dihedral_angle_float_names
 
         self.evaluate = evaluate
-        self.isomorphic = isomorphic
+        self.isomorphism = isomorphism
 
     def _flat_shapes(self, d):
         for name in d:
@@ -206,8 +210,8 @@ class ConfGenTaskCollateFn:
         num_nodes = []
         pos_list = []
 
-        isomorphic = []
-        isomorphic_num = []
+        isomorphism = []
+        isomorphism_num = []
 
         node_count = 0
         for i, data in enumerate(data_list):
@@ -272,9 +276,9 @@ class ConfGenTaskCollateFn:
                 bond_angle_graph_list.append(ba_g)
                 angle_dihedral_graph_list.append(adi_g)
 
-                if encoder and self.isomorphic:
-                    isomorphic += [*data['isomorphic']]
-                    isomorphic_num.append(len(data['isomorphic']))
+                if encoder and self.isomorphism:
+                    isomorphism += [*data['isomorphism']]
+                    isomorphism_num.append(len(data['isomorphism']))
 
         if prior:
             feed_dict['Bl_node_i'] = np.concatenate(Bl_node_i, 0).reshape(-1).astype('int64')
@@ -293,7 +297,7 @@ class ConfGenTaskCollateFn:
             feed_dict['Adi_node_a'] = np.concatenate(Adi_node_a, 0).reshape(-1).astype('int64')
             feed_dict['Adi_node_b'] = np.concatenate(Adi_node_b, 0).reshape(-1).astype('int64')
             feed_dict['Adi_node_c'] = np.concatenate(Adi_node_c, 0).reshape(-1).astype('int64')
-            feed_dict['Adi_node_d'] = np.concatenate(Adi_node_c, 0).reshape(-1).astype('int64')
+            feed_dict['Adi_node_d'] = np.concatenate(Adi_node_d, 0).reshape(-1).astype('int64')
         if encoder:
             feed_dict['Adi_angle_dihedral'] = np.concatenate(Adi_angle_dihedral, 0).reshape(-1, 1).astype('float32')
 
@@ -317,13 +321,13 @@ class ConfGenTaskCollateFn:
         num_nodes = np.array(num_nodes)
         pos_list = np.vstack(pos_list)
 
-        if encoder and self.isomorphic:
+        if encoder and self.isomorphism:
             batch = {
                 "batch": batch_list,
                 "num_nodes": num_nodes,
                 "positions": pos_list,
-                "isomorphic": np.hstack(isomorphic),
-                "isomorphic_num": np.array(isomorphic_num)
+                "isomorphism": np.hstack(isomorphism),
+                "isomorphism_num": np.array(isomorphism_num)
             }
             return graph_dict, feed_dict, batch
 
@@ -336,7 +340,8 @@ class ConfGenTaskCollateFn:
 
     def __call__(self, batch_data_list):
         prior_data_list = [x[0] for x in batch_data_list]
-        decoder_data_list = [x[-1] for x in batch_data_list]
+        decoder_data_list = [x[-2] for x in batch_data_list]
+        mol_list = sum([x[-1] for x in batch_data_list], [])
 
         prior_data_list = sum(prior_data_list, [])
         decoder_data_list = sum(decoder_data_list, [])
@@ -346,13 +351,13 @@ class ConfGenTaskCollateFn:
         )
 
         decoder_graph, decoder_feed, decoder_batch = self.process_data(
-            decoder_data_list, only_atom_bond=True, prior=False, encoder=False
+            decoder_data_list, only_atom_bond=False, prior=False, encoder=False
         )
 
         if self.evaluate:
             return prior_graph, decoder_graph, \
                 prior_feed, decoder_feed, \
-                prior_batch, decoder_batch
+                prior_batch, decoder_batch, mol_list
 
         if not self.evaluate:
             encoder_data_list = [x[1] for x in batch_data_list]
@@ -364,4 +369,4 @@ class ConfGenTaskCollateFn:
 
             return prior_graph, encoder_graph, decoder_graph,\
                 prior_feed, encoder_feed, decoder_feed,\
-                prior_batch, encoder_batch, decoder_batch
+                prior_batch, encoder_batch, decoder_batch, mol_list
