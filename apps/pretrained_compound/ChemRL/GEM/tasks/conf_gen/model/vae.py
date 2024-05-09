@@ -394,14 +394,14 @@ class VAE(nn.Layer):
         # prior positions loss
 
         # decoder positions loss
-        for i, position in enumerate(decoder_positions_list):
-            loss_tmp, _ = alignment_loss(
-                extra_output["gt_positions"],
-                paddle.index_select(position, axis=0, index=new_idx),
-                extra_output["batch_dict"]
-            )
-            loss += loss_tmp * (1.0 if i == 0 else self.aux_weight)
-            loss_dict[f"loss_decoder_position_{i}"] = loss_tmp.numpy()[0]
+        # for i, position in enumerate(decoder_positions_list):
+        #     loss_tmp, _ = alignment_loss(
+        #         extra_output["gt_positions"],
+        #         paddle.index_select(position, axis=0, index=new_idx),
+        #         extra_output["batch_dict"]
+        #     )
+        #     loss += loss_tmp * (1.0 if i == 0 else self.aux_weight)
+        #     loss_dict[f"loss_decoder_position_{i}"] = loss_tmp.numpy()[0]
 
         loss_tmp, _ = alignment_loss(
             extra_output["gt_positions"],
