@@ -90,18 +90,32 @@ class ConfGenTaskTransformFn:
             get_pretrain_angle_dihedral(
                 data["AngleDihedralGraph_edges"], data['BondAngleGraph_edges'],
                 data['edges'], data['dihedral_angle'])
-        data['Adi_node_a'] = node_a
-        data['Adi_node_b'] = node_b
-        data['Adi_node_c'] = node_c
-        data['Adi_node_d'] = node_d
-        data['Adi_angle_dihedral'] = dihedral_angles
+
+        ring_edges = data['edges'][data['is_in_ring'] != 1]
+
+        mask = (node_a == node_b) | (node_a == node_c) | (node_a == node_d) | \
+               (node_b == node_c) | (node_b == node_d) | (node_c == node_d)
+
+        med_edges = np.stack([node_b, node_c], axis=1)
+        ring_mask = np.array(list(map(lambda x: (ring_edges == x).all(axis=1).any(), med_edges)))
+
+        mask |= ring_mask
+
+        data['Adi_node_a'] = node_a[~mask]
+        data['Adi_node_b'] = node_b[~mask]
+        data['Adi_node_c'] = node_c[~mask]
+        data['Adi_node_d'] = node_d[~mask]
+        data['Adi_angle_dihedral'] = np.array(dihedral_angles)[~mask]
 
         node_i, node_j, node_k, bond_angles = \
             get_pretrain_bond_angle(data['BondAngleGraph_edges'], data['edges'], data['bond_angle'])
-        data['Ba_node_i'] = node_i
-        data['Ba_node_j'] = node_j
-        data['Ba_node_k'] = node_k
-        data['Ba_bond_angle'] = bond_angles
+
+        mask = (node_i == node_j) | (node_i == node_k) | (node_j == node_k)
+
+        data['Ba_node_i'] = node_i[~mask]
+        data['Ba_node_j'] = node_j[~mask]
+        data['Ba_node_k'] = node_k[~mask]
+        data['Ba_bond_angle'] = np.array(bond_angles)[~mask]
 
         return data
 
