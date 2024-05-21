@@ -1,129 +1,26 @@
-import math
-import numpy as np
-
 import paddle
 import paddle.nn as nn
 # from rdkit.Chem import rdDepictor as DP
 from rdkit import RDLogger
 
+
 try:
     from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.loss.e3_loss import alignment_loss, move2origin
     from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.model.layers import ConfPriorLayer, ConfEncoderLayer, \
         ConfDecoderLayer
+    from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.model.update_graph import updated_graph
 except:
     from conf_gen.loss.e3_loss import alignment_loss
     from conf_gen.model.layers import ConfPriorLayer, ConfEncoderLayer, \
         ConfDecoderLayer
-from pahelix.model_zoo.gem_model import GNNModel
+    from conf_gen.model.update_graph import updated_graph
+
 from pahelix.networks.basic_block import MLP
 
 RDLogger.DisableLog('rdApp.*')
 
 
 TARGET_MAPPING = ['bond_length', 'bond_angle', 'dihedral_angle']
-
-
-def get_bond_length(positions, feed_dict):
-    position_i = paddle.gather(positions, feed_dict['Bl_node_i'])
-    position_j = paddle.gather(positions, feed_dict['Bl_node_j'])
-
-    bond_length = paddle.norm(position_i - position_j, p=2, axis=1).unsqueeze(1)
-    return bond_length
-
-
-def get_bond_angle(positions, feed_dict):
-    def _get_angle(vec1, vec2):
-        norm1 = paddle.norm(vec1, p=2, axis=1)
-        norm2 = paddle.norm(vec2, p=2, axis=1)
-
-        mask = (norm1.unsqueeze(axis=1) == 0) | (norm2.unsqueeze(axis=1) == 0)
-
-        vec1 = vec1 / (norm1.unsqueeze(axis=1) + 1e-5)  # 1e-5: prevent numerical errors
-        vec2 = vec2 / (norm2.unsqueeze(axis=1) + 1e-5)
-
-        angle = paddle.acos(paddle.dot(vec1, vec2))
-        angle[mask] = 0
-
-        return angle
-
-    position_i = paddle.gather(positions, feed_dict['Ba_node_i'])
-    position_j = paddle.gather(positions, feed_dict['Ba_node_j'])
-    position_k = paddle.gather(positions, feed_dict['Ba_node_k'])
-
-    bond_angle = _get_angle(position_j - position_i, position_j - position_k)
-    return bond_angle
-
-
-def get_dihedral_angle(positions, feed_dict):
-    position_a = paddle.gather(positions, feed_dict['Adi_node_a'])
-    position_b = paddle.gather(positions, feed_dict['Adi_node_b'])
-    position_c = paddle.gather(positions, feed_dict['Adi_node_c'])
-    position_d = paddle.gather(positions, feed_dict['Adi_node_d'])
-
-    rAB = position_b - position_a
-    rBC = position_c - position_b
-    rCD = position_d - position_c
-
-    nABC = paddle.cross(rAB, rBC)
-    nABCSqLength = paddle.sum(nABC * nABC, axis=1)
-
-    nBCD = paddle.cross(rBC, rCD)
-    nBCDSqLength = paddle.sum(nBCD * nBCD, axis=1)
-
-    m = paddle.cross(nABC, rBC)
-
-    angles = -paddle.atan2(
-        paddle.sum(m * nBCD, axis=1) / (paddle.sqrt(nBCDSqLength * paddle.sum(m * m, axis=1)) + 1e-4),
-        paddle.sum(nABC * nBCD, axis=1) / (paddle.sqrt(nABCSqLength * nBCDSqLength) + 1e-4)
-    )
-
-    return angles
-
-
-def updated_graph(graph, feed_dict, now_positions, delta_positions, batch, num_nodes, update_target):
-    new_graph = graph.copy()
-
-    new_positions = now_positions + delta_positions
-
-    atom_bond_graph = new_graph['atom_bond_graph']
-    bond_angel_graph = new_graph['bond_angle_graph']
-    angle_dihedral_graph = new_graph["angle_dihedral_graph"]
-    # new_positions, _ = move2origin(new_positions, batch, num_nodes)
-
-    if update_target == "bond_length":
-        new_target_values = get_bond_length(new_positions, feed_dict)
-
-        atom_bond_graph.edge_feat['bond_length'] = new_target_values.squeeze()
-
-    elif update_target == "bond_angle":
-        new_target_values = get_bond_angle(new_positions, feed_dict)
-
-        angle_atoms = atom_bond_graph.edges.gather(bond_angel_graph.edges.flatten()).reshape((-1, 4))
-        mask = angle_atoms[:, 0] == angle_atoms[:, -1]
-        bond_angel_graph.edge_feat['bond_angle'][~mask] = new_target_values.squeeze()
-
-    elif update_target == "dihedral_angle":
-        new_target_values = get_dihedral_angle(new_positions, feed_dict)
-
-        # ultra_edges为所有的组成二面角的键角
-        # super_edges为所有的组成键角的化学键
-        ultra_edges = angle_dihedral_graph.edges
-        super_edges = bond_angel_graph.edges
-        edges = atom_bond_graph.edges
-
-        # 过滤出首尾为同一化学键的可能
-        head_edges = super_edges.gather(ultra_edges[:, 0])[:, 0]
-        tail_edges = super_edges.gather(ultra_edges[:, 1])[:, -1]
-        mask_1 = head_edges == tail_edges
-
-        head_edge_atoms = edges.gather(head_edges)
-        tail_edge_atoms = edges.gather(tail_edges)
-        mask_2 = (head_edge_atoms[:, 0] == head_edge_atoms[:, 1]) | (tail_edge_atoms[:, 0] == tail_edge_atoms[:, 1])
-
-        mask = mask_1 | mask_2
-        angle_dihedral_graph.edge_feat["dihedral_angle"][~mask] = new_target_values.squeeze()
-
-    return new_graph, new_positions, new_target_values
 
 
 class ConfPrior(nn.Layer):
@@ -156,8 +53,6 @@ class ConfPrior(nn.Layer):
                 feed_dict=prior_feed,
                 now_positions=new_positions,
                 delta_positions=delta_positions,
-                batch=prior_batch["batch"],
-                num_nodes=prior_batch["num_nodes"],
                 update_target=TARGET_MAPPING[flag]
             )
 
@@ -209,8 +104,6 @@ class ConfEncoder(nn.Layer):
                 feed_dict=prior_feed,
                 now_positions=new_positions,
                 delta_positions=delta_positions,
-                batch=encoder_batch["batch"],
-                num_nodes=encoder_batch["num_nodes"],
                 update_target=TARGET_MAPPING[flag]
             )
 
@@ -249,8 +142,6 @@ class ConfDecoder(nn.Layer):
                 feed_dict=prior_feed,
                 now_positions=new_positions,
                 delta_positions=delta_positions,
-                batch=decoder_batch["batch"],
-                num_nodes=decoder_batch["num_nodes"],
                 update_target=TARGET_MAPPING[flag]
             )
 
@@ -346,8 +237,6 @@ class VAE(nn.Layer):
             feed_dict=prior_feed,
             now_positions=prior_positions_list[-1],
             delta_positions=0,
-            batch=prior_batch['batch'],
-            num_nodes=prior_batch['num_nodes'],
             update_target='bond_length'
         )
 
@@ -366,31 +255,52 @@ class VAE(nn.Layer):
         return decoder_positions_list
 
     def compute_loss(self, decoder_positions_list, encoder_batch, extra_output):
-        loss = 0
-        loss_dict = {}
-
         # kld loss
-        if "latent_mean" in extra_output:
-            mean = extra_output["latent_mean"]
-            log_std = extra_output["latent_logstd"]
+        mean = extra_output["latent_mean"]
+        log_std = extra_output["latent_logstd"]
+        loss_kld, loss_dict_kld = self.compute_kld_loss(mean, log_std)
 
-            loss_kld, loss_dict_kld = self.compute_kld_loss(mean, log_std)
-            loss += loss_kld
-            loss_dict = {**loss_dict_kld}
+        # position loss
+        loss_position, loss_dict_position = self.compute_positions_loss(
+            gt_positions=extra_output["gt_positions"],
+            prior_positions_list=extra_output["prior_positions_list"],
+            decoder_positions_list=decoder_positions_list,
+            encoder_batch=encoder_batch,
+            weight=4
+        )
 
-        pos_x = encoder_batch["positions"]
-        pos_y = encoder_batch["positions"]
-        new_idx = self.update_iso(pos_x, pos_y, encoder_batch)
+        # geometry_loss
+        loss_geometry, loss_dict_geometry = self.compute_geometry_loss(extra_output)
+
+        loss = loss_kld + loss_position + loss_geometry
+        # loss = loss_kld + loss_geometry
+        loss_dict = {
+            **loss_dict_kld,
+            **loss_dict_position,
+            **loss_dict_geometry,
+            "loss": loss.numpy()[0]
+        }
+
+        return loss, loss_dict
+
+    def compute_kld_loss(self, mean, log_std):
+        kld = -0.5 * paddle.sum(1 + 2 * log_std - mean.pow(2) - paddle.exp(2 * log_std), axis=-1)
+        kld = kld.mean()  # todo check this line
+
+        return kld * self.vae_beta, {'loss_kld': kld.numpy()[0]}
+
+    def compute_positions_loss(self, gt_positions, prior_positions_list, decoder_positions_list, encoder_batch, weight):
+        pos_x = decoder_positions_list[-1]
+        pos_y = gt_positions
+        new_idx = self.update_iso(pos_y, pos_x, encoder_batch)
 
         # prior positions loss
-        loss_tmp, _ = alignment_loss(
+        loss_prior_position, _ = alignment_loss(
             # pos, pos_list[i].index_select(0, new_idx), batch, clamp=args.clamp_dist
-            extra_output["gt_positions"],
-            paddle.index_select(extra_output["prior_positions_list"][-1], axis=0, index=new_idx),
-            extra_output["batch_dict"]
+            gt_positions,
+            paddle.index_select(prior_positions_list[-1], axis=0, index=new_idx),
+            batch=encoder_batch
         )
-        loss += loss_tmp * 4  # todo
-        loss_dict["loss_prior_position"] = loss_tmp.numpy()[0]
         # prior positions loss
 
         # decoder positions loss
@@ -403,52 +313,29 @@ class VAE(nn.Layer):
         #     loss += loss_tmp * (1.0 if i == 0 else self.aux_weight)
         #     loss_dict[f"loss_decoder_position_{i}"] = loss_tmp.numpy()[0]
 
-        loss_tmp, _ = alignment_loss(
-            extra_output["gt_positions"],
+        # decoder positions loss
+        loss_decoder_position, _ = alignment_loss(
+            gt_positions,
             paddle.index_select(decoder_positions_list[-1], axis=0, index=new_idx),
-            extra_output["batch_dict"]
+            batch=encoder_batch
         )
-        loss += loss_tmp * 4 * self.n_layers
-        loss_dict[f"loss_decoder_position"] = loss_tmp.numpy()[0]
         # decoder positions loss
 
-        # geometry loss
-        geometry_loss, loss_dict_geometry = self.compute_geometry_loss(extra_output)
-        loss += geometry_loss
+        loss_dict = {
+            "loss_prior_position": loss_prior_position.numpy()[0],
+            "loss_decoder_position": loss_decoder_position.numpy()[0],
+        }
+        loss = (loss_prior_position + loss_decoder_position * self.n_layers) * weight
 
-        loss_dict = {"loss": loss.numpy()[0], **loss_dict, **loss_dict_geometry}
-        # loss_dict = {"loss": loss.numpy()[0], **loss_dict}
-
-        # for task in ['bond_length', 'bond_angle']:
-        #     positions = self.decoder(decoder_graph, decoder_feed, latent, batch)
-        #     sub_losses[f"{task}_loss"] = self.compute_geometry_loss(positions, decoder_feed, pretrain_task=task)
-        #     self.update_decoder_graph(decoder_graph, positions)
-        # # KL Distance
-        # loss_kl = self.compute_vae_kl(mu_q, sigma_q, mu_p, sigma_p)
-        #
-        # loss += (loss_kl * self.vae_beta)
-        # sub_losses['kl_loss'] = loss_kl
-        # sub_losses['loss'] = loss
-        #
-        # for name in sub_losses:
-        #     sub_losses[name] = sub_losses[name].numpy().mean()
         return loss, loss_dict
-
-    def compute_kld_loss(self, mean, log_std):
-        kld = -0.5 * paddle.sum(1 + 2 * log_std - mean.pow(2) - paddle.exp(2 * log_std), axis=-1)
-        kld = kld.mean()  # todo check this line
-
-        return kld * self.vae_beta, {'loss_kld': kld.numpy()[0]}
 
     def _compute_bond_length_loss(self, gt_bond_length, prior_bond_length_list, decoder_bond_length_list, weight=1, step=0.2):
         loss = 0
         loss_dict = {}
 
-        bond_length_mask = ~gt_bond_length.equal(0)
-
         loss_prior = self.bond_length_loss(
-            prior_bond_length_list[-1][bond_length_mask],
-            gt_bond_length[bond_length_mask]
+            prior_bond_length_list[-1],
+            gt_bond_length
 
         )
         loss += (loss_prior * weight)  # todo
@@ -456,8 +343,8 @@ class VAE(nn.Layer):
 
         for i, bond_length in enumerate(decoder_bond_length_list):
             loss_decoder = self.bond_length_loss(
-                bond_length[bond_length_mask],
-                gt_bond_length[bond_length_mask]
+                bond_length,
+                gt_bond_length
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
             loss_dict[f"loss_decoder_bond_length_{i}"] = loss_decoder.numpy()[0]
@@ -468,19 +355,17 @@ class VAE(nn.Layer):
         loss = 0
         loss_dict = {}
 
-        bond_angle_mask = ~gt_bond_angle.equal(0)
-
         loss_prior = self.bond_angle_loss(
-            prior_bond_angle_list[-1][bond_angle_mask],
-            gt_bond_angle[bond_angle_mask]
+            prior_bond_angle_list[-1],
+            gt_bond_angle
         )
         loss += (loss_prior * weight)  # todo
         loss_dict["loss_prior_bond_angle"] = loss_prior.numpy()[0]
 
         for i, bond_angle in enumerate(decoder_bond_angle_list):
-            loss_decoder = self.bond_length_loss(
-                bond_angle[bond_angle_mask],
-                gt_bond_angle[bond_angle_mask]
+            loss_decoder = self.bond_angle_loss(
+                bond_angle,
+                gt_bond_angle
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
             loss_dict[f"loss_decoder_bond_angle_{i}"] = loss_decoder.numpy()[0]
@@ -490,8 +375,6 @@ class VAE(nn.Layer):
     def _compute_dihedral_angle_loss(self, gt_dihedral_angle, prior_dihedral_angle_list, decoder_dihedral_angle_list, weight=1, step=0.2):
         loss = 0
         loss_dict = {}
-
-        dihedral_angle_mask = ~gt_dihedral_angle.equal(0)
 
         loss_prior = self.dihedral_angle_loss(
             prior_dihedral_angle_list[-1].unsqueeze(1),
@@ -536,7 +419,8 @@ class VAE(nn.Layer):
         )
 
         loss = loss_bond_length + loss_bond_angle + loss_dihedral_angle
-        # loss = loss_dihedral_angle
+        # loss = loss_bond_length + loss_bond_angle
+
         loss_dict = {
             **loss_dict_bond_length,
             **loss_dict_bond_angle,
