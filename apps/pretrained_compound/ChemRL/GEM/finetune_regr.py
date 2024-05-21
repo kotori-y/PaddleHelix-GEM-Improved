@@ -1,5 +1,5 @@
 #!/usr/bin/python                                                                                                                                  
-#-*-coding:utf-8-*- 
+# -*-coding:utf-8-*-
 #   Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,13 +33,13 @@ from pahelix.datasets.inmemory_dataset import InMemoryDataset
 from src.model import DownstreamModel
 from src.featurizer import DownstreamTransformFn, DownstreamCollateFn
 from src.utils import get_dataset, create_splitter, get_downstream_task_names, get_dataset_stat, \
-        calc_rocauc_score, calc_rmse, calc_mae, exempt_parameters
+    calc_rocauc_score, calc_rmse, calc_mae, exempt_parameters
 
 
 def train(
-        args, 
+        args,
         model, label_mean, label_std,
-        train_dataset, collate_fn, 
+        train_dataset, collate_fn,
         criterion, encoder_opt, head_opt):
     """
     Define the train function 
@@ -49,10 +49,10 @@ def train(
         the average of the list loss
     """
     data_gen = train_dataset.get_data_loader(
-            batch_size=args.batch_size, 
-            num_workers=args.num_workers, 
-            shuffle=True,
-            collate_fn=collate_fn)
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=True,
+        collate_fn=collate_fn)
     list_loss = []
     model.train()
     for atom_bond_graphs, bond_angle_graphs, angle_dihedral_graphs, labels in data_gen:
@@ -76,7 +76,7 @@ def train(
 
 
 def evaluate(
-        args, 
+        args,
         model, label_mean, label_std,
         test_dataset, collate_fn, metric):
     """
@@ -85,10 +85,10 @@ def evaluate(
     to help eliminate these blank labels in both training and evaluation phase.
     """
     data_gen = test_dataset.get_data_loader(
-            batch_size=args.batch_size, 
-            num_workers=args.num_workers, 
-            shuffle=False,
-            collate_fn=collate_fn)
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=False,
+        collate_fn=collate_fn)
     total_pred = []
     total_label = []
     model.eval()
@@ -117,9 +117,9 @@ def get_label_stat(dataset):
 
 def get_metric(dataset_name):
     """tbd"""
-    if dataset_name in ['esol', 'freesolv', 'lipophilicity']:
+    if dataset_name in ['esol', 'freesolv', 'lipophilicity', 'logpow', 'solubility', 'boilingpoint', 'pka', 'diy']:
         return 'rmse'
-    elif dataset_name in ['qm7', 'qm8', 'qm9', 'qm9_gdb']:
+    elif dataset_name in ['qm7', 'qm8', 'qm9', 'qm9_gdb', 'quandb']:
         return 'mae'
     else:
         raise ValueError(dataset_name)
@@ -173,8 +173,8 @@ def main(args):
         print(i, param[0], param[1].name)
 
     if not args.init_model is None and not args.init_model == "":
-        # compound_encoder.set_state_dict(paddle.load(args.init_model))
-        model.set_state_dict(paddle.load(args.init_model))
+        compound_encoder.set_state_dict(paddle.load(args.init_model))
+        # model.set_state_dict(paddle.load(args.init_model))
         print('Load state_dict from %s' % args.init_model)
 
     ### load data    
@@ -197,9 +197,9 @@ def main(args):
 
     splitter = create_splitter(args.split_type)
     train_dataset, valid_dataset, test_dataset = splitter.split(
-            dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
+        dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
     print("Train/Valid/Test num: %s/%s/%s" % (
-            len(train_dataset), len(valid_dataset), len(test_dataset)))
+        len(train_dataset), len(valid_dataset), len(test_dataset)))
     print('Train min/max/mean %s/%s/%s' % get_label_stat(train_dataset))
     print('Valid min/max/mean %s/%s/%s' % get_label_stat(valid_dataset))
     print('Test min/max/mean %s/%s/%s' % get_label_stat(test_dataset))
@@ -207,23 +207,23 @@ def main(args):
     ### start train
     list_val_metric, list_test_metric = [], []
     collate_fn = DownstreamCollateFn(
-            atom_names=compound_encoder_config['atom_names'], 
-            bond_names=compound_encoder_config['bond_names'],
-            bond_float_names=compound_encoder_config['bond_float_names'],
-            bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
-            dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names'],
-            task_type=task_type)
+        atom_names=compound_encoder_config['atom_names'],
+        bond_names=compound_encoder_config['bond_names'],
+        bond_float_names=compound_encoder_config['bond_float_names'],
+        bond_angle_float_names=compound_encoder_config['bond_angle_float_names'],
+        dihedral_angle_float_names=compound_encoder_config['dihedral_angle_float_names'],
+        task_type=task_type)
     for epoch_id in range(args.max_epoch):
         train_loss = train(
-                args, model, label_mean, label_std, 
-                train_dataset, collate_fn, 
-                criterion, encoder_opt, head_opt)
+            args, model, label_mean, label_std,
+            train_dataset, collate_fn,
+            criterion, encoder_opt, head_opt)
         val_metric = evaluate(
-                args, model, label_mean, label_std, 
-                valid_dataset, collate_fn, metric)
+            args, model, label_mean, label_std,
+            valid_dataset, collate_fn, metric)
         test_metric = evaluate(
-                args, model, label_mean, label_std, 
-                test_dataset, collate_fn, metric)
+            args, model, label_mean, label_std,
+            test_dataset, collate_fn, metric)
 
         list_val_metric.append(val_metric)
         list_test_metric.append(test_metric)
@@ -232,16 +232,16 @@ def main(args):
         print("epoch:%s val/%s:%s" % (epoch_id, metric, val_metric))
         print("epoch:%s test/%s:%s" % (epoch_id, metric, test_metric))
         print("epoch:%s test/%s_by_eval:%s" % (epoch_id, metric, test_metric_by_eval))
-        paddle.save(compound_encoder.state_dict(), 
-                '%s/epoch%d/compound_encoder.pdparams' % (args.model_dir, epoch_id))
-        paddle.save(model.state_dict(), 
-                '%s/epoch%d/model.pdparams' % (args.model_dir, epoch_id))
+        paddle.save(compound_encoder.state_dict(),
+                    '%s/epoch%d/compound_encoder.pdparams' % (args.model_dir, epoch_id))
+        paddle.save(model.state_dict(),
+                    '%s/epoch%d/model.pdparams' % (args.model_dir, epoch_id))
 
     outs = {
         'model_config': basename(args.model_config).replace('.json', ''),
         'metric': '',
-        'dataset': args.dataset_name, 
-        'split_type': args.split_type, 
+        'dataset': args.dataset_name,
+        'split_type': args.split_type,
         'batch_size': args.batch_size,
         'dropout_rate': args.dropout_rate,
         'encoder_lr': args.encoder_lr,
@@ -249,9 +249,9 @@ def main(args):
     }
     best_epoch_id = np.argmin(list_val_metric)
     for metric, value in [
-            ('test_%s' % metric, list_test_metric[best_epoch_id]),
-            ('max_valid_%s' % metric, np.min(list_val_metric)),
-            ('max_test_%s' % metric, np.min(list_test_metric))]:
+        ('test_%s' % metric, list_test_metric[best_epoch_id]),
+        ('max_valid_%s' % metric, np.min(list_val_metric)),
+        ('max_test_%s' % metric, np.min(list_test_metric))]:
         outs['metric'] = metric
         print('\t'.join(['FINAL'] + ["%s:%s" % (k, outs[k]) for k in outs] + [str(value)]))
 
@@ -263,13 +263,17 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--max_epoch", type=int, default=100)
-    parser.add_argument("--dataset_name", 
-            choices=['esol', 'freesolv', 'lipophilicity', 
-                'qm7', 'qm8', 'qm9', 'qm9_gdb'])
+    parser.add_argument("--dataset_name",
+                        choices=[
+                            'esol', 'freesolv', 'lipophilicity',
+                            'qm7', 'qm8', 'qm9', 'qm9_gdb',
+                            'quandb', 'logpow', 'solubility',
+                            'boilingpoint', 'pka', 'diy'
+                        ])
     parser.add_argument("--data_path", type=str, default=None)
     parser.add_argument("--cached_data_path", type=str, default=None)
-    parser.add_argument("--split_type", 
-            choices=['random', 'scaffold', 'random_scaffold', 'index'])
+    parser.add_argument("--split_type",
+                        choices=['random', 'scaffold', 'random_scaffold', 'index'])
 
     parser.add_argument("--compound_encoder_config", type=str)
     parser.add_argument("--model_config", type=str)
@@ -279,5 +283,5 @@ if __name__ == '__main__':
     parser.add_argument("--head_lr", type=float, default=0.001)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
     args = parser.parse_args()
-    
+
     main(args)
