@@ -75,7 +75,19 @@ def get_downstream_task_names(dataset_name, data_path):
     elif dataset_name == 'qm9':
         return get_default_qm9_task_names()  
     elif dataset_name == 'qm9_gdb':
-        return get_default_qm9_gdb_task_names()  
+        return get_default_qm9_gdb_task_names()
+    elif dataset_name == 'quandb':
+        return get_default_quandb_task_names()
+    elif dataset_name == 'logpow':
+        return get_default_logpow_task_names()
+    elif dataset_name == 'solubility':
+        return get_default_solubility_task_names()
+    elif dataset_name == 'boilingpoint':
+        return get_default_boilingpoint_task_names()
+    elif dataset_name == 'pka':
+        return get_default_pka_task_names()
+    elif dataset_name == 'diy':
+        return get_default_diy_task_names()
     else:
         raise ValueError('%s not supported' % dataset_name)
 
@@ -114,6 +126,18 @@ def get_dataset(dataset_name, data_path, task_names):
         dataset = load_qm9_dataset(data_path, task_names)
     elif dataset_name == 'qm9_gdb':
         dataset = load_qm9_gdb_dataset(data_path, task_names)
+    elif dataset_name == "quandb":
+        dataset = load_quandb_dataset(data_path, task_names)
+    elif dataset_name == 'logpow':
+        return load_logpow_dataset(data_path, task_names)
+    elif dataset_name == 'solubility':
+        return load_solubility_dataset(data_path, task_names)
+    elif dataset_name == 'boilingpoint':
+        return load_boilingpoint_dataset(data_path, task_names)
+    elif dataset_name == 'pka':
+        return load_pka_dataset(data_path, task_names)
+    elif dataset_name == 'diy':
+        dataset = load_diy_dataset(data_path, task_names)
     else:
         raise ValueError('%s not supported' % dataset_name)
 
@@ -136,6 +160,18 @@ def get_dataset_stat(dataset_name, data_path, task_names):
         return get_qm9_stat(data_path, task_names)
     elif dataset_name == 'qm9_gdb':
         return get_qm9_gdb_stat(data_path, task_names)
+    elif dataset_name == 'quandb':
+        return get_quandb_stat(data_path, task_names)
+    elif dataset_name == 'logpow':
+        return get_logpow_stat(data_path, task_names)
+    elif dataset_name == 'solubility':
+        return get_solubility_stat(data_path, task_names)
+    elif dataset_name == 'boilingpoint':
+        return get_boilingpoint_stat(data_path, task_names)
+    elif dataset_name == 'pka':
+        return get_pka_stat(data_path, task_names)
+    elif dataset_name == 'diy':
+        return get_diy_stat(data_path, task_names)
     else:
         raise ValueError(dataset_name)
 
