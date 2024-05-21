@@ -37,3 +37,10 @@ from pahelix.datasets.qm8_dataset import *
 from pahelix.datasets.qm9_dataset import *
 from pahelix.datasets.davis_dataset import *
 from pahelix.datasets.kiba_dataset import *
+from pahelix.datasets.diy_dataset import *
+from pahelix.datasets.quandb_dataset import *
+from pahelix.datasets.boilingpoint_dataset import *
+from pahelix.datasets.pka_dataset import *
+from pahelix.datasets.logpow_dataset import *
+from pahelix.datasets.solubility_dataset import *
+ #  'logpow', 'solubility', 'boilingpoint', 'pka'
