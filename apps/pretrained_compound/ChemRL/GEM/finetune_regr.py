@@ -26,7 +26,7 @@ import paddle
 import paddle.nn as nn
 import pgl
 
-from pahelix.model_zoo.gem_model import GeoGNNModel
+from pahelix.model_zoo.gem_model import GeoGNNModel, GeoGNNModelOld
 from pahelix.utils import load_json_config
 from pahelix.datasets.inmemory_dataset import InMemoryDataset
 
@@ -40,7 +40,8 @@ def train(
         args,
         model, label_mean, label_std,
         train_dataset, collate_fn,
-        criterion, encoder_opt, head_opt):
+        criterion, encoder_opt, head_opt,
+):
     """
     Define the train function 
     Args:
@@ -155,8 +156,13 @@ def main(args):
     print(model_config)
 
     ### build model
-    compound_encoder = GeoGNNModel(compound_encoder_config)
-    model = DownstreamModel(model_config, compound_encoder)
+    if not args.use_gem:
+        compound_encoder = GeoGNNModel(compound_encoder_config)
+    else:
+        compound_encoder = GeoGNNModelOld(compound_encoder_config)
+
+    model = DownstreamModel(model_config, compound_encoder, use_gem=args.use_gem)
+
     if metric == 'square':
         criterion = nn.MSELoss()
     else:
@@ -282,6 +288,9 @@ if __name__ == '__main__':
     parser.add_argument("--encoder_lr", type=float, default=0.001)
     parser.add_argument("--head_lr", type=float, default=0.001)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
+
+    parser.add_argument("--use_gem", iaction='store_true', default=False)
+
     args = parser.parse_args()
 
     main(args)
