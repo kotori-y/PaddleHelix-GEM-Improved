@@ -289,7 +289,7 @@ if __name__ == '__main__':
     parser.add_argument("--head_lr", type=float, default=0.001)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
 
-    parser.add_argument("--use_gem", iaction='store_true', default=False)
+    parser.add_argument("--use_gem", action='store_true', default=False)
 
     args = parser.parse_args()
 
