@@ -57,7 +57,7 @@ class ConfDecoderLayer(nn.Layer):
             dropout_rate=head_config['dropout_rate']
         )
         # self.latent_emb = nn.Linear(decoder_config['embed_dim'], decoder_config['embed_dim'])
-        self.norm_layer = nn.LayerNorm(decoder_config['embed_dim'], decoder_config['embed_dim'])
+        self.norm_layer = nn.LayerNorm(decoder_config['embed_dim'])
 
     def forward(self, decoder_graph, decoder_batch, latent):
         node_repr, _, _ = self.decode_model(**decoder_graph)
