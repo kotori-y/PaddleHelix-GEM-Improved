@@ -165,7 +165,7 @@ def evaluate(model: VAE, data_gen, args):
         }
 
         with paddle.no_grad():
-            _, loss_dict, positions_list = model(**net_inputs, sample=True)
+            _, loss_dict, positions_list = model(**net_inputs)
 
         position = positions_list[-1]
         for k, v in loss_dict.items():

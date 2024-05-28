@@ -18,8 +18,13 @@ def get_bond_length(positions, feed_dict):
     position_i = paddle.gather(positions, feed_dict['Bl_node_i'])
     position_j = paddle.gather(positions, feed_dict['Bl_node_j'])
 
+    masked_position_i = paddle.gather(positions, feed_dict['masked_Bl_node_i'])
+    masked_position_j = paddle.gather(positions, feed_dict['masked_Bl_node_j'])
+
     bond_length = paddle.norm(position_i - position_j, p=2, axis=1).unsqueeze(1)
-    return bond_length
+    masked_bond_length = paddle.norm(masked_position_i - masked_position_j, p=2, axis=1).unsqueeze(1)
+
+    return bond_length, masked_bond_length
 
 
 def get_bond_angle(positions, feed_dict):
@@ -42,39 +47,50 @@ def get_bond_angle(positions, feed_dict):
     position_j = paddle.gather(positions, feed_dict['Ba_node_j'])
     position_k = paddle.gather(positions, feed_dict['Ba_node_k'])
 
+    masked_position_i = paddle.gather(positions, feed_dict['masked_Ba_node_i'])
+    masked_position_j = paddle.gather(positions, feed_dict['masked_Ba_node_j'])
+    masked_position_k = paddle.gather(positions, feed_dict['masked_Ba_node_k'])
+
     bond_angle = _get_angle(position_j - position_i, position_j - position_k)
-    return bond_angle
+    masked_bond_angle = _get_angle(masked_position_j - masked_position_i, masked_position_j - masked_position_k)
+
+    return bond_angle, masked_bond_angle
 
 
 def get_dihedral_angle(positions, feed_dict):
-    position_a = paddle.gather(positions, feed_dict['Adi_node_a'])
-    position_b = paddle.gather(positions, feed_dict['Adi_node_b'])
-    position_c = paddle.gather(positions, feed_dict['Adi_node_c'])
-    position_d = paddle.gather(positions, feed_dict['Adi_node_d'])
+    def _get_dihedral_angle(vec1, vec2, vec3):
+        nABC = paddle.cross(vec1, vec2)
+        nBCD = paddle.cross(vec2, vec3)
 
-    rAB = position_b - position_a
-    rBC = position_c - position_b
-    rCD = position_d - position_c
+        b = paddle.cross(nABC, nBCD)
 
-    nABC = paddle.cross(rAB, rBC)
-    # nABCSqLength = paddle.sum(nABC * nABC, axis=1)
+        tmp = paddle.sum(nABC * nBCD, axis=1) / (paddle.linalg.norm(nABC, axis=1) * paddle.linalg.norm(nBCD, axis=1))
+        unsigned_rad = acos_safe(tmp)
 
-    nBCD = paddle.cross(rBC, rCD)
-    # nBCDSqLength = paddle.sum(nBCD * nBCD, axis=1)
+        unsigned_rad = paddle.where(paddle.isnan(unsigned_rad), paddle.zeros(unsigned_rad.shape), unsigned_rad)
 
-    # m = paddle.cross(nABC, rBC)
+        return paddle.where(paddle.sum(vec2 * b, axis=1) > 0, unsigned_rad, -unsigned_rad)
 
-    # angles_1 = -paddle.atan2(
-    #     paddle.sum(m * nBCD, axis=1) / (paddle.sqrt(nBCDSqLength * paddle.sum(m * m, axis=1)) + 1e-4),
-    #     paddle.sum(nABC * nBCD, axis=1) / (paddle.sqrt(nABCSqLength * nBCDSqLength) + 1e-4)
-    # )
+    position_a = paddle.gather(positions, feed_dict["Adi_node_a"])
+    position_b = paddle.gather(positions, feed_dict["Adi_node_b"])
+    position_c = paddle.gather(positions, feed_dict["Adi_node_c"])
+    position_d = paddle.gather(positions, feed_dict["Adi_node_d"])
 
-    b = paddle.cross(nABC, nBCD)
+    masked_position_a = paddle.gather(positions, feed_dict["masked_Adi_node_a"])
+    masked_position_b = paddle.gather(positions, feed_dict["masked_Adi_node_b"])
+    masked_position_c = paddle.gather(positions, feed_dict["masked_Adi_node_c"])
+    masked_position_d = paddle.gather(positions, feed_dict["masked_Adi_node_d"])
 
-    tmp = paddle.sum(nABC * nBCD, axis=1) / (paddle.linalg.norm(nABC, axis=1) * paddle.linalg.norm(nBCD, axis=1))
-    unsigned_rad = acos_safe(tmp)
+    dihedral_angle = _get_dihedral_angle(
+        vec1=position_b - position_a,
+        vec2=position_c - position_b,
+        vec3=position_d - position_c
+    )
 
-    unsigned_rad = paddle.where(paddle.isnan(unsigned_rad), paddle.zeros(unsigned_rad.shape), unsigned_rad)
+    masked_dihedral_angle = _get_dihedral_angle(
+        vec1=masked_position_b - masked_position_a,
+        vec2=masked_position_c - masked_position_b,
+        vec3=masked_position_d - masked_position_c
+    )
 
-    return paddle.where(paddle.sum(rBC * b, axis=1) > 0, unsigned_rad, -unsigned_rad)
-    # return unsigned_rad
+    return dihedral_angle, masked_dihedral_angle

@@ -22,7 +22,7 @@ NUM_LAYERS=3
 
 LR=1e-4
 
-DATASET="qm9_bond_angle_diheral_gt_no_position"
+DATASET="qm9_bond_angle_diheral_iso_gtinput_wo_noise"
 LOG_PATH="./log/"
 
 TRAIN_DATA_PATH="./data/raw/train"
@@ -31,10 +31,10 @@ VALID_DATA_PATH="./data/raw/valid"
 TRAIN_DATA_PATH_DEBUG="./data/raw/test"
 VALID_DATA_PATH_DEBUG="./data/raw/test"
 
-PRIOR_CONFIG="./data/configs/prior.json"
-ENCODER_CONFIG="./data/configs/encoder.json"
-DECODER_CONFIG="./data/configs/decoder.json"
-HEAD_CONFIG="./data/configs/head.json"
+PRIOR_CONFIG="./data/prior.json"
+ENCODER_CONFIG="./data/encoder.json"
+DECODER_CONFIG="./data/decoder.json"
+HEAD_CONFIG="./data/head.json"
 
 INIT_MODEL=''
 
@@ -116,5 +116,6 @@ elif [ $DEBUG -eq 0 ] && [ $DISTRIBUTED -eq 1 ]; then
     --dropout_rate $DROPOUT_RATE \
     --n_noise_mol $N_NOISE_MOL \
     --vae_beta $VAE_BETA \
+    --isomorphism \
     --distributed
 fi

@@ -9,29 +9,29 @@ except:
 
 def update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions):
 
-    new_target_values = get_bond_length(new_positions, feed_dict)
-    atom_bond_graph.edge_feat['bond_length'] = new_target_values.squeeze()
+    bond_length, masked_bond_length = get_bond_length(new_positions, feed_dict)
+    atom_bond_graph.edge_feat['bond_length'] = bond_length.squeeze()
 
-    return atom_bond_graph, new_target_values
+    return atom_bond_graph, masked_bond_length
 
 
 def update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_positions):
 
-    new_target_values = get_bond_angle(new_positions, feed_dict)
+    bond_angle, masked_bond_angle = get_bond_angle(new_positions, feed_dict)
 
     angle_atoms = atom_bond_graph.edges.gather(bond_angel_graph.edges.flatten()).reshape((-1, 4))
     mask = (angle_atoms[:, 0] == angle_atoms[:, 1]) | \
            (angle_atoms[:, 0] == angle_atoms[:, -1]) | \
            (angle_atoms[:, 1] == angle_atoms[:, -1])
 
-    bond_angel_graph.edge_feat['bond_angle'][~mask] = new_target_values.squeeze()
+    bond_angel_graph.edge_feat['bond_angle'][~mask] = bond_angle.squeeze()
     bond_angel_graph.edge_feat['bond_angle'][mask] = 0
 
-    return bond_angel_graph, new_target_values
+    return bond_angel_graph, masked_bond_angle
 
 
 def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bond_graph, feed_dict, new_positions):
-    new_target_values = get_dihedral_angle(new_positions, feed_dict)
+    dihedral_angle, masked_dihedral_angle = get_dihedral_angle(new_positions, feed_dict)
 
     # ultra_edges为所有的组成二面角的键角
     # super_edges为所有的组成键角的化学键
@@ -51,16 +51,16 @@ def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bon
     mask_2 = (_edges[:, 1] == _edges[:, 2]) | (_edges[:, 1] == _edges[:, 3])
     mask_3 = (_edges[:, 2] == _edges[:, 3])
 
-    ring_edges = edges[atom_bond_graph.edge_feat['is_in_ring'] != 1]
-    med_edges = _edges[:, 1:3]
-    ring_mask = paddle.concat(list(map(lambda x: (ring_edges == x).all(axis=1).any(), med_edges)))
+    # ring_edges = edges[atom_bond_graph.edge_feat['is_in_ring'] != 1]
+    # med_edges = _edges[:, 1:3]
+    # ring_mask = paddle.concat(list(map(lambda x: (ring_edges == x).all(axis=1).any(), med_edges)))
 
     mask = mask_1 | mask_2 | mask_3
 
-    angle_dihedral_graph.edge_feat["dihedral_angle"][~(mask | ring_mask)] = new_target_values.squeeze()
+    angle_dihedral_graph.edge_feat["dihedral_angle"][~mask] = dihedral_angle.squeeze()
     angle_dihedral_graph.edge_feat["dihedral_angle"][mask] = 0
 
-    return angle_dihedral_graph, new_target_values
+    return angle_dihedral_graph, masked_dihedral_angle
 
 
 def updated_graph(graph, feed_dict, now_positions, delta_positions, update_target):

@@ -207,9 +207,9 @@ class VAE(nn.Layer):
 
         if encoder_feed and encoder_batch:
             extra_output["gt_positions"] = encoder_batch["positions"]
-            extra_output["gt_bond_length"] = encoder_feed["Bl_bond_length"]
-            extra_output["gt_bond_angle"] = encoder_feed["Ba_bond_angle"]
-            extra_output["gt_dihedral_angle"] = encoder_feed["Adi_angle_dihedral"]
+            extra_output["gt_masked_bond_length"] = encoder_feed["masked_Bl_bond_length"]
+            extra_output["gt_masked_bond_angle"] = encoder_feed["masked_Ba_bond_angle"]
+            extra_output["gt_masked_dihedral_angle"] = encoder_feed["masked_Adi_angle_dihedral"]
 
         # prior
         prior_positions_list = self.prior(prior_graph, prior_feed, prior_batch)
@@ -229,20 +229,21 @@ class VAE(nn.Layer):
         # encoder
 
         # decoder
-        decoder_graph, _, _, = updated_graph(
-            graph=decoder_graph,
-            feed_dict=prior_feed,
-            now_positions=prior_positions_list[-1],
-            delta_positions=0,
-            update_target='bond_length'
-        )
+        for i in range(self.n_layers):
+            decoder_graph, _, _, = updated_graph(
+                graph=decoder_graph,
+                feed_dict=prior_feed,
+                now_positions=prior_positions_list[-1],
+                delta_positions=0,
+                update_target=TARGET_MAPPING[i]
+            )
 
         decoder_positions_list, decoder_bond_length_list, decoder_bond_angle_list, decoder_dihedral_angle_list = \
             self.decoder(decoder_graph, prior_feed, decoder_batch, latent)
 
-        extra_output["decoder_bond_length_list"] = decoder_bond_length_list
-        extra_output["decoder_bond_angle_list"] = decoder_bond_angle_list
-        extra_output["decoder_dihedral_angle_list"] = decoder_dihedral_angle_list
+        extra_output["decoder_masked_bond_length_list"] = decoder_bond_length_list
+        extra_output["decoder_masked_bond_angle_list"] = decoder_bond_angle_list
+        extra_output["decoder_masked_dihedral_angle_list"] = decoder_dihedral_angle_list
         # decoder
 
         if compute_loss:
@@ -370,22 +371,22 @@ class VAE(nn.Layer):
 
     def compute_geometry_loss(self, extra_output):
         loss_bond_length, loss_dict_bond_length = self._compute_bond_length_loss(
-            gt_bond_length=extra_output["gt_bond_length"],
-            decoder_bond_length_list=extra_output["decoder_bond_length_list"],
+            gt_bond_length=extra_output["gt_masked_bond_length"],
+            decoder_bond_length_list=extra_output["decoder_masked_bond_length_list"],
             weight=1,
             step=0.2
         )
 
         loss_bond_angle, loss_dict_bond_angle = self._compute_bond_angle_loss(
-            gt_bond_angle=extra_output["gt_bond_angle"],
-            decoder_bond_angle_list=extra_output["decoder_bond_angle_list"],
-            weight=2,
+            gt_bond_angle=extra_output["gt_masked_bond_angle"],
+            decoder_bond_angle_list=extra_output["decoder_masked_bond_angle_list"],
+            weight=1,
             step=0.2
         )
 
         loss_dihedral_angle, loss_dict_dihedral_angle = self._compute_dihedral_angle_loss(
-            gt_dihedral_angle=extra_output["gt_dihedral_angle"],
-            decoder_dihedral_angle_list=extra_output["decoder_dihedral_angle_list"],
+            gt_dihedral_angle=extra_output["gt_masked_dihedral_angle"],
+            decoder_dihedral_angle_list=extra_output["decoder_masked_dihedral_angle_list"],
             weight=2,
             step=0.2
         )
