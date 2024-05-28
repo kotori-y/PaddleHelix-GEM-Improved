@@ -56,14 +56,15 @@ class ConfDecoderLayer(nn.Layer):
             act=head_config['act'],
             dropout_rate=head_config['dropout_rate']
         )
-        self.latent_emb = nn.Linear(decoder_config['embed_dim'], decoder_config['embed_dim'])
+        # self.latent_emb = nn.Linear(decoder_config['embed_dim'], decoder_config['embed_dim'])
+        self.norm_layer = nn.LayerNorm(decoder_config['embed_dim'], decoder_config['embed_dim'])
 
     def forward(self, decoder_graph, decoder_batch, latent):
         node_repr, _, _ = self.decode_model(**decoder_graph)
 
-        latent = self.latent_emb(latent)
+        # latent = self.latent_emb(latent)
         latent = paddle.to_tensor(np.repeat(latent.numpy(), decoder_batch["num_nodes"], axis=0))
 
-        node_repr = paddle.add(node_repr, latent)
+        node_repr = self.norm_layer(paddle.add(node_repr, latent))
         positions = self.pos_layer(node_repr)
         return positions
