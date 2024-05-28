@@ -63,7 +63,12 @@ class ConfDecoderLayer(nn.Layer):
         node_repr, _, _ = self.decode_model(**decoder_graph)
 
         # latent = self.latent_emb(latent)
-        latent = paddle.to_tensor(np.repeat(latent.numpy(), decoder_batch["num_nodes"], axis=0))
+        # to numpy may cause gradient disappear
+        # latent = paddle.to_tensor(np.repeat(latent.numpy(), decoder_batch["num_nodes"], axis=0))
+
+        # repeat_times not available in current version of paddle in development env
+        tmp = [[latent[i]] * int(decoder_batch["num_nodes"][i]) for i in range(len(decoder_batch["num_nodes"]))]
+        latent = paddle.stack(sum(tmp, []))
 
         node_repr = self.norm_layer(paddle.add(node_repr, latent))
         positions = self.pos_layer(node_repr)
