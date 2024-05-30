@@ -36,10 +36,11 @@ class ConfPrior(nn.Layer):
         )
 
     def forward(self, prior_graph, prior_feed, prior_batch):
-        prior_positions_list = []
-        # prior_bond_length_list = []
-        # prior_bond_angle_list = []
-        # prior_dihedral_angle_list = []
+        # prior_positions_list = []
+
+        prior_bond_length_list = []
+        prior_bond_angle_list = []
+        prior_dihedral_angle_list = []
 
         new_positions = prior_batch["positions"]
 
@@ -48,25 +49,27 @@ class ConfPrior(nn.Layer):
 
             flag = i % 3
 
-            prior_graph, new_positions, _ = updated_graph(
+            prior_graph, new_positions, new_target_values = updated_graph(
                 graph=prior_graph,
                 feed_dict=prior_feed,
                 now_positions=new_positions,
                 delta_positions=delta_positions,
-                update_target=TARGET_MAPPING[flag]
+                update_target=TARGET_MAPPING[flag],
+                batch=prior_batch['batch'],
+                num_nodes=prior_batch['num_nodes']
             )
 
-            prior_positions_list.append(new_positions)
+            # prior_positions_list.append(new_positions)
 
-            # if flag == 0:
-            #     prior_bond_length_list.append(new_target_values)
-            # elif flag == 1:
-            #     prior_bond_angle_list.append(new_target_values)
-            # else:
-            #     prior_dihedral_angle_list.append(new_target_values)
+            if flag == 0:
+                prior_bond_length_list.append(new_target_values)
+            elif flag == 1:
+                prior_bond_angle_list.append(new_target_values)
+            else:
+                prior_dihedral_angle_list.append(new_target_values)
 
-        # return prior_positions_list, prior_bond_length_list, prior_bond_angle_list, prior_dihedral_angle_list
-        return prior_positions_list
+        return new_positions, prior_bond_length_list, prior_bond_angle_list, prior_dihedral_angle_list
+        # return prior_positions_list
 
 
 class ConfEncoder(nn.Layer):
@@ -105,7 +108,9 @@ class ConfEncoder(nn.Layer):
                 feed_dict=prior_feed,
                 now_positions=new_positions,
                 delta_positions=delta_positions,
-                update_target=TARGET_MAPPING[flag]
+                update_target=TARGET_MAPPING[flag],
+                batch=encoder_batch['batch'],
+                num_nodes=encoder_batch['num_nodes']
             )
 
         latent = self.encoder_head(graph_repr)
@@ -127,9 +132,9 @@ class ConfDecoder(nn.Layer):
 
     def forward(self, decoder_graph, prior_feed, decoder_batch, latent):
         decoder_positions_list = []
-        decoder_bond_length_list = []
-        decoder_bond_angle_list = []
-        decoder_dihedral_angle_list = []
+        # decoder_bond_length_list = []
+        # decoder_bond_angle_list = []
+        # decoder_dihedral_angle_list = []
 
         new_positions = decoder_batch["positions"]
 
@@ -138,24 +143,27 @@ class ConfDecoder(nn.Layer):
 
             flag = i % 3
 
-            prior_graph, new_positions, new_target_values = updated_graph(
+            prior_graph, new_positions, _ = updated_graph(
                 graph=decoder_graph,
                 feed_dict=prior_feed,
                 now_positions=new_positions,
                 delta_positions=delta_positions,
-                update_target=TARGET_MAPPING[flag]
+                update_target=TARGET_MAPPING[flag],
+                batch=decoder_batch['batch'],
+                num_nodes=decoder_batch['num_nodes']
             )
 
             decoder_positions_list.append(new_positions)
 
-            if flag == 0:
-                decoder_bond_length_list.append(new_target_values)
-            elif flag == 1:
-                decoder_bond_angle_list.append(new_target_values)
-            else:
-                decoder_dihedral_angle_list.append(new_target_values)
+            # if flag == 0:
+            #     decoder_bond_length_list.append(new_target_values)
+            # elif flag == 1:
+            #     decoder_bond_angle_list.append(new_target_values)
+            # else:
+            #     decoder_dihedral_angle_list.append(new_target_values)
 
-        return decoder_positions_list, decoder_bond_length_list, decoder_bond_angle_list, decoder_dihedral_angle_list
+        # return decoder_positions_list, decoder_bond_length_list, decoder_bond_angle_list, decoder_dihedral_angle_list
+        return decoder_positions_list
 
 
 class VAE(nn.Layer):
@@ -212,9 +220,15 @@ class VAE(nn.Layer):
             extra_output["gt_masked_dihedral_angle"] = encoder_feed["masked_Adi_angle_dihedral"]
 
         # prior
-        prior_positions_list = self.prior(prior_graph, prior_feed, prior_batch)
+        # prior_positions_list = self.prior(prior_graph, prior_feed, prior_batch)
+        prior_position_last, prior_bond_length_list, prior_bond_angle_list, prior_dihedral_angle_list = self.prior(
+            prior_graph, prior_feed, prior_batch
+        )
 
-        extra_output["prior_positions_list"] = prior_positions_list
+        # extra_output["prior_positions_list"] = prior_positions_list
+        extra_output["prior_masked_bond_length_list"] = prior_bond_length_list
+        extra_output["prior_masked_bond_angle_list"] = prior_bond_angle_list
+        extra_output["prior_masked_dihedral_angle_list"] = prior_dihedral_angle_list
         extra_output["batch_dict"] = prior_batch
         # prior
 
@@ -233,17 +247,18 @@ class VAE(nn.Layer):
             decoder_graph, _, _, = updated_graph(
                 graph=decoder_graph,
                 feed_dict=prior_feed,
-                now_positions=prior_positions_list[-1],
+                now_positions=prior_position_last,
                 delta_positions=0,
-                update_target=TARGET_MAPPING[i]
+                update_target=TARGET_MAPPING[i],
+                batch=decoder_batch['batch'],
+                num_nodes=decoder_batch['num_nodes']
             )
 
-        decoder_positions_list, decoder_bond_length_list, decoder_bond_angle_list, decoder_dihedral_angle_list = \
-            self.decoder(decoder_graph, prior_feed, decoder_batch, latent)
+        decoder_positions_list = self.decoder(decoder_graph, prior_feed, decoder_batch, latent)
 
-        extra_output["decoder_masked_bond_length_list"] = decoder_bond_length_list
-        extra_output["decoder_masked_bond_angle_list"] = decoder_bond_angle_list
-        extra_output["decoder_masked_dihedral_angle_list"] = decoder_dihedral_angle_list
+        # extra_output["decoder_masked_bond_length_list"] = decoder_bond_length_list
+        # extra_output["decoder_masked_bond_angle_list"] = decoder_bond_angle_list
+        # extra_output["decoder_masked_dihedral_angle_list"] = decoder_dihedral_angle_list
         # decoder
 
         if compute_loss:
@@ -264,10 +279,9 @@ class VAE(nn.Layer):
         # position loss
         loss_position, loss_dict_position = self.compute_positions_loss(
             gt_positions=extra_output["gt_positions"],
-            prior_positions_list=extra_output["prior_positions_list"],
             decoder_positions_list=decoder_positions_list,
             encoder_batch=encoder_batch,
-            weight=5
+            weight=3
         )
 
         loss = loss_kld + loss_position + loss_geometry
@@ -287,19 +301,19 @@ class VAE(nn.Layer):
 
         return kld * self.vae_beta, {'loss_kld': kld.numpy()[0]}
 
-    def compute_positions_loss(self, gt_positions, prior_positions_list, decoder_positions_list, encoder_batch, weight):
+    def compute_positions_loss(self, gt_positions, decoder_positions_list, encoder_batch, weight):
         pos_x = decoder_positions_list[-1]
         pos_y = gt_positions
         new_idx = self.update_iso(pos_y, pos_x, encoder_batch)
 
-        # prior positions loss
-        loss_prior_position, _ = alignment_loss(
-            # pos, pos_list[i].index_select(0, new_idx), batch, clamp=args.clamp_dist
-            gt_positions,
-            paddle.index_select(prior_positions_list[-1], axis=0, index=new_idx),
-            batch=encoder_batch
-        )
-        # prior positions loss
+        # # prior positions loss
+        # loss_prior_position, _ = alignment_loss(
+        #     # pos, pos_list[i].index_select(0, new_idx), batch, clamp=args.clamp_dist
+        #     gt_positions,
+        #     paddle.index_select(prior_positions_list[-1], axis=0, index=new_idx),
+        #     batch=encoder_batch
+        # )
+        # # prior positions loss
 
         # decoder positions loss
         # for i, position in enumerate(decoder_positions_list):
@@ -320,79 +334,79 @@ class VAE(nn.Layer):
         # decoder positions loss
 
         loss_dict = {
-            "loss_prior_position": loss_prior_position.numpy()[0],
+            # "loss_prior_position": loss_prior_position.numpy()[0],
             "loss_decoder_position": loss_decoder_position.numpy()[0],
         }
-        loss = (loss_prior_position + loss_decoder_position * self.n_layers) * weight
+        loss = (loss_decoder_position * self.n_layers) * weight
 
         return loss, loss_dict
 
-    def _compute_bond_length_loss(self, gt_bond_length, decoder_bond_length_list, weight=1, step=0.2):
+    def _compute_bond_length_loss(self, gt_bond_length, bond_length_list, weight=1, step=0.2):
         loss = 0
         loss_dict = {}
 
         zero_mask = gt_bond_length == 0
 
-        for i, bond_length in enumerate(decoder_bond_length_list):
+        for i, bond_length in enumerate(bond_length_list):
             loss_decoder = self.bond_length_loss(
                 bond_length[~zero_mask],
                 gt_bond_length[~zero_mask]
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
-            loss_dict[f"loss_decoder_bond_length_{i}"] = loss_decoder.numpy()[0]
+            loss_dict[f"loss_bond_length_{i}"] = loss_decoder.numpy()[0]
 
         return loss, loss_dict
 
-    def _compute_bond_angle_loss(self, gt_bond_angle, decoder_bond_angle_list, weight=1, step=0.2):
+    def _compute_bond_angle_loss(self, gt_bond_angle, bond_angle_list, weight=1, step=0.2):
         loss = 0
         loss_dict = {}
 
         zero_mask = gt_bond_angle <= 0.01
 
-        for i, bond_angle in enumerate(decoder_bond_angle_list):
+        for i, bond_angle in enumerate(bond_angle_list):
             loss_decoder = self.bond_angle_loss(
                 bond_angle[~zero_mask],
                 gt_bond_angle[~zero_mask]
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
-            loss_dict[f"loss_decoder_bond_angle_{i}"] = loss_decoder.numpy()[0]
+            loss_dict[f"loss_bond_angle_{i}"] = loss_decoder.numpy()[0]
 
         return loss, loss_dict
 
-    def _compute_dihedral_angle_loss(self, gt_dihedral_angle, decoder_dihedral_angle_list, weight=1, step=0.2):
+    def _compute_dihedral_angle_loss(self, gt_dihedral_angle, dihedral_angle_list, weight=1, step=0.2):
         loss = 0
         loss_dict = {}
 
         zero_mask = gt_dihedral_angle <= 0.01
 
-        for i, dihedral_angle in enumerate(decoder_dihedral_angle_list):
+        for i, dihedral_angle in enumerate(dihedral_angle_list):
             loss_decoder = self.dihedral_angle_loss(
                 dihedral_angle.unsqueeze(1)[~zero_mask],
                 gt_dihedral_angle[~zero_mask]
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
-            loss_dict[f"loss_decoder_dihedral_angle_{i}"] = loss_decoder.numpy()[0]
+            loss_dict[f"loss_dihedral_angle_{i}"] = loss_decoder.numpy()[0]
 
         return loss, loss_dict
 
     def compute_geometry_loss(self, extra_output):
         loss_bond_length, loss_dict_bond_length = self._compute_bond_length_loss(
             gt_bond_length=extra_output["gt_masked_bond_length"],
-            decoder_bond_length_list=extra_output["decoder_masked_bond_length_list"],
+            bond_length_list=extra_output["prior_masked_bond_length_list"],
             weight=1,
             step=0.2
         )
 
         loss_bond_angle, loss_dict_bond_angle = self._compute_bond_angle_loss(
             gt_bond_angle=extra_output["gt_masked_bond_angle"],
-            decoder_bond_angle_list=extra_output["decoder_masked_bond_angle_list"],
+            bond_angle_list=extra_output["prior_masked_bond_angle_list"],
             weight=1,
             step=0.2
         )
 
         loss_dihedral_angle, loss_dict_dihedral_angle = self._compute_dihedral_angle_loss(
             gt_dihedral_angle=extra_output["gt_masked_dihedral_angle"],
-            decoder_dihedral_angle_list=extra_output["decoder_masked_dihedral_angle_list"],
+            dihedral_angle_list=extra_output["prior_masked_dihedral_angle_list"],
             weight=2,
             step=0.2
         )

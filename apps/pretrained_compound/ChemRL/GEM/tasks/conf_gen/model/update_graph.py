@@ -3,8 +3,19 @@ import paddle
 try:
     from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.model.utils import get_bond_length, get_bond_angle, \
         get_dihedral_angle
+    from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import scatter_mean
 except:
     from conf_gen.model.utils import get_bond_length, get_bond_angle, get_dihedral_angle
+    from conf_gen.utils import scatter_mean
+
+
+def move2origin(poses, batch, num_nodes):
+    dim_size = batch.max() + 1
+    index = paddle.to_tensor(batch)
+    poses_mean = scatter_mean(poses, index, 0, dim_size)
+    _poses_mean = poses_mean.numpy().repeat(num_nodes, axis=0)
+    _poses_mean = paddle.to_tensor(_poses_mean, dtype=poses_mean.dtype)
+    return poses - _poses_mean, poses_mean
 
 
 def update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions):
@@ -69,8 +80,8 @@ def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bon
     return angle_dihedral_graph, masked_dihedral_angle
 
 
-def updated_graph(graph, feed_dict, now_positions, delta_positions, update_target):
-    new_positions = now_positions + delta_positions
+def updated_graph(graph, feed_dict, now_positions, delta_positions, update_target, batch, num_nodes):
+    new_positions, _ = move2origin(now_positions + delta_positions, batch, num_nodes)
 
     atom_bond_graph = graph['atom_bond_graph']
     bond_angel_graph = graph['bond_angle_graph']
