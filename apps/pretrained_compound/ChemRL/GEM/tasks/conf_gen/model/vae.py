@@ -48,7 +48,7 @@ class ConfPrior(nn.Layer):
 
             flag = i % 3
 
-            prior_graph, new_positions, new_target_values = updated_graph(
+            prior_graph, new_positions, _ = updated_graph(
                 graph=prior_graph,
                 feed_dict=prior_feed,
                 now_positions=new_positions,
@@ -258,6 +258,9 @@ class VAE(nn.Layer):
         log_std = extra_output["latent_logstd"]
         loss_kld, loss_dict_kld = self.compute_kld_loss(mean, log_std)
 
+        # geometry_loss
+        loss_geometry, loss_dict_geometry = self.compute_geometry_loss(extra_output)
+
         # position loss
         loss_position, loss_dict_position = self.compute_positions_loss(
             gt_positions=extra_output["gt_positions"],
@@ -266,9 +269,6 @@ class VAE(nn.Layer):
             encoder_batch=encoder_batch,
             weight=5
         )
-
-        # geometry_loss
-        loss_geometry, loss_dict_geometry = self.compute_geometry_loss(extra_output)
 
         loss = loss_kld + loss_position + loss_geometry
         # loss = loss_kld + loss_geometry
@@ -331,10 +331,12 @@ class VAE(nn.Layer):
         loss = 0
         loss_dict = {}
 
+        zero_mask = gt_bond_length == 0
+
         for i, bond_length in enumerate(decoder_bond_length_list):
             loss_decoder = self.bond_length_loss(
-                bond_length,
-                gt_bond_length
+                bond_length[~zero_mask],
+                gt_bond_length[~zero_mask]
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
             loss_dict[f"loss_decoder_bond_length_{i}"] = loss_decoder.numpy()[0]
@@ -345,10 +347,12 @@ class VAE(nn.Layer):
         loss = 0
         loss_dict = {}
 
+        zero_mask = gt_bond_angle <= 0.01
+
         for i, bond_angle in enumerate(decoder_bond_angle_list):
             loss_decoder = self.bond_angle_loss(
-                bond_angle,
-                gt_bond_angle
+                bond_angle[~zero_mask],
+                gt_bond_angle[~zero_mask]
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
             loss_dict[f"loss_decoder_bond_angle_{i}"] = loss_decoder.numpy()[0]
@@ -359,10 +363,12 @@ class VAE(nn.Layer):
         loss = 0
         loss_dict = {}
 
+        zero_mask = gt_dihedral_angle <= 0.01
+
         for i, dihedral_angle in enumerate(decoder_dihedral_angle_list):
             loss_decoder = self.dihedral_angle_loss(
-                dihedral_angle.unsqueeze(1),
-                gt_dihedral_angle
+                dihedral_angle.unsqueeze(1)[~zero_mask],
+                gt_dihedral_angle[~zero_mask]
             )
             loss += (loss_decoder * weight * (1 + (i * step)))
             loss_dict[f"loss_decoder_dihedral_angle_{i}"] = loss_decoder.numpy()[0]
