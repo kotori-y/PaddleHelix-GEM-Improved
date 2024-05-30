@@ -12,6 +12,8 @@ def update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions):
     bond_length, masked_bond_length = get_bond_length(new_positions, feed_dict)
     atom_bond_graph.edge_feat['bond_length'] = bond_length.squeeze()
 
+    atom_bond_graph.edge_feat['bond_length'] = atom_bond_graph.edge_feat['bond_length'].detach()
+
     return atom_bond_graph, masked_bond_length
 
 
@@ -26,6 +28,8 @@ def update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_po
 
     bond_angel_graph.edge_feat['bond_angle'][~mask] = bond_angle.squeeze()
     bond_angel_graph.edge_feat['bond_angle'][mask] = 0
+
+    bond_angel_graph.edge_feat['bond_angle'] = bond_angel_graph.edge_feat['bond_angle'].detach()
 
     return bond_angel_graph, masked_bond_angle
 
@@ -59,6 +63,8 @@ def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bon
 
     angle_dihedral_graph.edge_feat["dihedral_angle"][~mask] = dihedral_angle.squeeze()
     angle_dihedral_graph.edge_feat["dihedral_angle"][mask] = 0
+
+    angle_dihedral_graph.edge_feat['dihedral_angle'] = angle_dihedral_graph.edge_feat['dihedral_angle'].detach()
 
     return angle_dihedral_graph, masked_dihedral_angle
 
