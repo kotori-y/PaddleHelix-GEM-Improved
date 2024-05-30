@@ -12,6 +12,7 @@ from paddle.optimizer.lr import LambdaDecay
 import sys
 
 from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import set_rdmol_positions, get_best_rmsd
+from pahelix.datasets import InMemoryDataset
 
 sys.path.append("..")
 
@@ -21,6 +22,8 @@ from pahelix.utils import load_json_config
 from pahelix.model_zoo.gem_model import GeoGNNModel, GNNModel
 
 from tqdm import tqdm
+
+from rdkit.Chem.rdForceFieldHelpers import MMFFOptimizeMolecule
 
 # from loss.e3_loss import compute_loss
 # # from model.gnn import ConfGenModel
@@ -177,9 +180,11 @@ def evaluate(model: VAE, data_gen, args):
 
         for i in range(batch_size):
             mol_labels.append(mol_list[i])
-            mol_preds.append(
-                set_rdmol_positions(mol_list[i], position[pre_nodes: pre_nodes + n_nodes[i]])
-            )
+
+            mol_pred = set_rdmol_positions(mol_list[i], position[pre_nodes: pre_nodes + n_nodes[i]])
+            MMFFOptimizeMolecule(mol_pred)
+            mol_preds.append(mol_pred)
+
             pre_nodes += n_nodes[i]
 
     for k in loss_accum_dict.keys():
