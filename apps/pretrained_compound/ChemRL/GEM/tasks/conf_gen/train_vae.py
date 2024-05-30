@@ -112,7 +112,7 @@ def evaluate(model: VAE, data_gen, args):
     mol_labels = []
     mol_preds = []
 
-    pbar = tqdm(data_gen, desc="Training Iteration", disable=args.disable_tqdm)
+    pbar = tqdm(data_gen, desc="Evaluating Iteration", disable=args.disable_tqdm)
 
     for step, (
             prior_graph, encoder_graph, decoder_graph,
@@ -209,33 +209,60 @@ def main(args):
         # down_config['dropout_rate'] = args.dropout_rate
 
     if not args.distributed or dist.get_rank() == 0:
-        print("===> Converting data...")
 
-        train_dataset = load_mol_to_dataset(args.train_data_path, debug=args.debug)
-        valid_dataset = load_mol_to_dataset(args.valid_data_path, debug=args.debug)
-        # test_dataset = load_mol_to_dataset(args.test_dataset)
+        done_file = os.path.join(args.cached_data_path, f"{args.dataset}.done")
 
-        print({
-            "train_num": len(train_dataset),
-            "valid_num": len(valid_dataset),
-            # "test_num": len(test_dataset),
-        })
+        if args.cached_data_path == "" or (args.cached_data_path != "" and not os.path.exists(done_file)):
 
-        if args.debug:
-            train_dataset = train_dataset[:32]
-            args.epochs = 10
-            args.dataset = 'debug'
-            valid_dataset = valid_dataset[:32]
-            # test_dataset = test_dataset[:32]
-            args.num_workers = 1
+            print("===> Convert data...")
 
-        train_dataset = train_dataset[dist.get_rank()::dist.get_world_size()]
-        print('Total size:%s' % (len(train_dataset)))
+            train_dataset = load_mol_to_dataset(args.train_data_path, debug=args.debug)
+            valid_dataset = load_mol_to_dataset(args.valid_data_path, debug=args.debug)
 
-        transform_fn = ConfGenTaskTransformFn(n_noise_mol=args.n_noise_mol, isomorphism=args.isomorphism)
-        train_dataset.transform(transform_fn, num_workers=args.num_workers)
-        valid_dataset.transform(transform_fn, num_workers=args.num_workers)
-        # test_dataset.transform(transform_fn, num_workers=args.num_workers)
+            if args.debug:
+                train_dataset = train_dataset[:32]
+                args.epochs = 10
+                args.dataset = 'debug'
+                valid_dataset = valid_dataset[:32]
+                args.num_workers = 1
+                args.cached_data_path = "./data/cached_data/debug"
+
+            print({
+                "train_num": len(train_dataset),
+                "valid_num": len(valid_dataset),
+            })
+            train_dataset = train_dataset[dist.get_rank()::dist.get_world_size()]
+            print('Total size:%s' % (len(train_dataset)))
+
+            transform_fn = ConfGenTaskTransformFn(n_noise_mol=args.n_noise_mol, isomorphism=args.isomorphism)
+
+            train_dataset.transform(transform_fn, num_workers=args.num_workers)
+            valid_dataset.transform(transform_fn, num_workers=args.num_workers)
+
+            print("===> Save data ...")
+
+            if args.cached_data_path:
+
+                if not os.path.exists(args.cached_data_path):
+                    os.makedirs(args.cached_data_path)
+
+                with open(os.path.join(args.cached_data_path, 'train.npy'), 'wb') as w1:
+                    pickle.dump(train_dataset, w1)
+
+                with open(os.path.join(args.cached_data_path, 'valid.npy'), 'wb') as w2:
+                    pickle.dump(valid_dataset, w2)
+
+                with open(done_file, 'w') as w3:
+                    w3.write("DONE!")
+
+        else:
+            print('====> Read preprocessing data...')
+
+            with open(os.path.join(args.cached_data_path, 'train.npy'), 'rb') as f1:
+                train_dataset = pickle.load(f1)
+
+            with open(os.path.join(args.cached_data_path, 'valid.npy'), 'rb') as f2:
+                valid_dataset = pickle.load(f2)
 
         collate_fn = ConfGenTaskCollateFn(
             atom_names=encoder_config['atom_names'],
@@ -293,7 +320,7 @@ def main(args):
         train_history = []
         valid_history = []
 
-        root = os.path.join(args.log_path, args.dataset)
+        root = os.path.join(args.log_path, args.task)
         if not os.path.exists(root):
             os.makedirs(root)
 
@@ -329,7 +356,9 @@ def main_cli():
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--num_layers", type=int, default=3)
 
-    parser.add_argument("--dataset", type=str, default='debug2')
+    parser.add_argument("--dataset", type=str, default='debug')
+    parser.add_argument("--task", type=str, default='debug')
+
     parser.add_argument("--train_data_path", type=str)
     parser.add_argument("--valid_data_path", type=str)
     parser.add_argument("--log_path", type=str, default='./log')
@@ -358,6 +387,8 @@ def main_cli():
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--distributed", action="store_true", default=False)
     parser.add_argument("--isomorphism", action="store_true", default=False)
+
+    parser.add_argument("--cached_data_path", type=str, default='')
 
     args = parser.parse_args()
     print(args)

@@ -164,19 +164,41 @@ def main(args):
     decoder_config = load_json_config(args.decoder_config)
     head_config = load_json_config(args.head_config)
 
-    print("===> Converting data...")
+    done_file = os.path.join(args.cached_data_path, f"{args.dataset_name}_eval.done")
 
-    test_dataset = load_mol_to_dataset(args.test_data_path, debug=args.debug)
-    print({"test_num": len(test_dataset)})
+    if args.cached_data_path == "" or (args.cached_data_path != "" and not os.path.exists(done_file)):
+        print("===> Converting data...")
+        test_dataset = load_mol_to_dataset(args.test_data_path, debug=args.debug)
 
-    if args.debug:
-        args.epochs = 10
-        args.dataset = 'debug'
-        test_dataset = test_dataset[:32]
-        args.num_workers = 1
+        if args.debug:
+            args.epochs = 10
+            args.dataset = 'debug'
+            test_dataset = test_dataset[:32]
+            args.num_workers = 1
 
-    transform_fn = ConfGenTaskTransformFn(n_noise_mol=args.n_noise_mol, isomorphism=False)
-    test_dataset.transform(transform_fn, num_workers=args.num_workers)
+        print({"test_num": len(test_dataset)})
+
+        transform_fn = ConfGenTaskTransformFn(n_noise_mol=args.n_noise_mol, isomorphism=False)
+        test_dataset.transform(transform_fn, num_workers=args.num_workers)
+
+        print("===> Save data ...")
+
+        if args.cached_data_path:
+
+            if not os.path.exists(args.cached_data_path):
+                os.makedirs(args.cached_data_path)
+
+            with open(os.path.join(args.cached_data_path, 'test.npy'), 'wb') as w1:
+                pickle.dump(test_dataset, w1)
+
+            with open(done_file, 'w') as w2:
+                w2.write("DONE!")
+
+    else:
+        print('====> Read preprocessing data...')
+
+        with open(os.path.join(args.cached_data_path, 'test.npy'), 'rb') as f1:
+            test_dataset = pickle.load(f1)
 
     collate_fn = ConfGenTaskCollateFn(
         atom_names=encoder_config['atom_names'],
@@ -230,6 +252,8 @@ def main_cli():
     parser.add_argument("--n_noise_mol", type=int, default=1)
 
     parser.add_argument("--debug", action="store_true", default=False)
+
+    parser.add_argument("--cached_data_path", type=str, default='')
 
     args = parser.parse_args()
     args.use_ff = True
