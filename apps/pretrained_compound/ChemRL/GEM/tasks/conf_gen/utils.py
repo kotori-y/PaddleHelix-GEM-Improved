@@ -54,9 +54,7 @@ def set_rdmol_positions(rdkit_mol, pos):
     return mol
 
 
-def get_best_rmsd(gen_mol, ref_mol, use_ff=True):
-    if use_ff:
-        MMFFOptimizeMolecule(gen_mol)
+def get_best_rmsd(gen_mol, ref_mol):
     gen_mol = RemoveHs(gen_mol)
     ref_mol = RemoveHs(ref_mol)
     rmsd = MA.GetBestRMS(gen_mol, ref_mol)

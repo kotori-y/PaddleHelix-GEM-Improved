@@ -1,5 +1,6 @@
 import argparse
 import copy
+import multiprocessing
 import os
 import pickle
 from collections import defaultdict
@@ -40,8 +41,7 @@ def evaluate(model: VAE, data_gen, args):
 
     pbar = tqdm(data_gen, desc="Training Iteration", disable=False)
 
-    mol_labels = []
-    mol_preds = []
+    inchikey2pairs = dict()
 
     for step, (
             prior_graph, encoder_graph, decoder_graph,
@@ -93,60 +93,77 @@ def evaluate(model: VAE, data_gen, args):
             "encoder_batch": encoder_batch,
         }
 
-        def foobar():
-            _mol_labels = []
-            _mol_preds = []
-
-            with paddle.no_grad():
-                positions_list = model(**net_inputs, sample=True, compute_loss=False)
+        with paddle.no_grad():
+            positions_list = model(**net_inputs, sample=True, compute_loss=False)
 
             pred_position = positions_list[-1]
             num_nodes = prior_batch["num_nodes"]
             pre_nodes = 0
 
             for i, mol in enumerate(mol_list):
-                _mol_labels.append(mol)
-                _mol_preds.append(
-                    set_rdmol_positions(
-                        mol, pred_position[pre_nodes: pre_nodes + num_nodes[i]]
-                    )
-                )
+                inchikey = Chem.MolToInchiKey(mol)
+
+                inchikey2pairs[inchikey][1].append(mol)
+
+                gen_mol = set_rdmol_positions(mol, pred_position[pre_nodes: pre_nodes + num_nodes[i]])
+
+                # mol_labels.append(mol)
+                # mol_preds.append(gen_mol)
+                if inchikey not in inchikey2pairs:
+                    inchikey2pairs[inchikey] = [[], []]
+
+                inchikey2pairs[inchikey][0].append(gen_mol)
+
                 pre_nodes += num_nodes[i]
 
-            return _mol_labels, _mol_preds
+        with paddle.no_grad():
+            positions_list = model(**net_inputs, sample=True, compute_loss=False)
 
-        for _ in range(2):
-            mol_labels_tmp, mol_preds_tmp = foobar()
-            mol_labels.extend(mol_labels_tmp)
-            mol_preds.extend(mol_preds_tmp)
+            pred_position = positions_list[-1]
+            num_nodes = prior_batch["num_nodes"]
+            pre_nodes = 0
 
-    smiles2pairs = dict()
-    for gen_mol in mol_preds:
-        smiles = Chem.MolToSmiles(gen_mol)
-        if smiles not in smiles2pairs:
-            smiles2pairs[smiles] = [[gen_mol]]
-        else:
-            smiles2pairs[smiles][0].append(gen_mol)
-    for ref_mol in mol_labels:
-        smiles = Chem.MolToSmiles(ref_mol)
-        if len(smiles2pairs[smiles]) == 1:
-            smiles2pairs[smiles].append([ref_mol])
-        else:
-            smiles2pairs[smiles][1].append(ref_mol)
+            for i, mol in enumerate(mol_list):
+                inchikey = Chem.MolToInchiKey(mol)
 
-    del_smiles = []
-    for smiles in smiles2pairs.keys():
-        if len(smiles2pairs[smiles][1]) < 50 or len(smiles2pairs[smiles][1]) > 500:
-            del_smiles.append(smiles)
-    for smiles in del_smiles:
-        del smiles2pairs[smiles]
+                gen_mol = set_rdmol_positions(mol, pred_position[pre_nodes: pre_nodes + num_nodes[i]])
+                # mol_preds.append(gen_mol)
+
+                inchikey2pairs[inchikey][0].append(gen_mol)
+                pre_nodes += num_nodes[i]
+
+    # for gen_mol in mol_preds:
+    #     # smiles = Chem.MolToSmiles(gen_mol)
+    #     inchikey = Chem.MolToInchiKey(gen_mol)
+    #     if inchikey not in inchikey2pairs:
+    #         inchikey2pairs[inchikey] = [[gen_mol]]
+    #     else:
+    #         inchikey2pairs[inchikey][0].append(gen_mol)
+    #
+    # for ref_mol in mol_labels:
+    #     inchikey = Chem.MolToInchiKey(ref_mol)
+    #     if len(inchikey2pairs[inchikey]) == 1:
+    #         inchikey2pairs[inchikey].append([ref_mol])
+    #     else:
+    #         inchikey2pairs[inchikey][1].append(ref_mol)
+
+    if not args.debug:
+        del_inchikey = []
+        for inchikey in inchikey2pairs.keys():
+            if len(inchikey2pairs[inchikey][1]) < 50 or len(inchikey2pairs[inchikey][1]) > 500:
+                del_inchikey.append(inchikey)
+        for inchikey in del_inchikey:
+            del inchikey2pairs[inchikey]
+            ...
+        # ...
 
     cov_list = []
     mat_list = []
+    # pool = multiprocessing.Pool(16)
 
     def input_args():
-        for smiles in smiles2pairs.keys():
-            yield smiles2pairs[smiles], args.use_ff, 0.5 if args.dataset_name == "qm9" else 1.25
+        for _inchikey in inchikey2pairs.keys():
+            yield inchikey2pairs[_inchikey], args.use_ff, 0.5 if args.dataset_name == "qm9" else 1.25
 
     for inputargs in input_args():
         res = get_rmsd_min(inputargs)
@@ -181,9 +198,9 @@ def main(args):
         transform_fn = ConfGenTaskTransformFn(n_noise_mol=args.n_noise_mol, isomorphism=False)
         test_dataset.transform(transform_fn, num_workers=args.num_workers)
 
-        print("===> Save data ...")
+        if args.cached_data_path and not args.debug:
 
-        if args.cached_data_path:
+            print("===> Save data ...")
 
             if not os.path.exists(args.cached_data_path):
                 os.makedirs(args.cached_data_path)
@@ -212,7 +229,7 @@ def main(args):
     test_data_gen = test_dataset.get_data_loader(
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        shuffle=True,
+        shuffle=False,
         collate_fn=collate_fn
     )
 
@@ -256,7 +273,7 @@ def main_cli():
     parser.add_argument("--cached_data_path", type=str, default='')
 
     args = parser.parse_args()
-    args.use_ff = True
+    args.use_ff = False
     print(args)
 
     main(args)
