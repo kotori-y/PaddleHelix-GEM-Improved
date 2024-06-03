@@ -69,7 +69,7 @@ class ConfGenTaskTransformFn:
 
     def __init__(self, noise=None, n_noise_mol=10, evaluate=False, isomorphism=False):
         if noise is None:
-            noise = [0, 0.5]
+            noise = [-0.1, 0.1]
         self.n_noise_mol = n_noise_mol
         self.noise = noise
         self.evaluate = evaluate
@@ -129,11 +129,11 @@ class ConfGenTaskTransformFn:
         else:
             gt_pos = mol.GetConformer().GetPositions()
 
-        # prior_pos_list = [np.random.uniform(-1, 1, size=(n_atoms, 3)) for _ in range(self.n_noise_mol)]
-        prior_pos_list = [gt_pos for _ in range(self.n_noise_mol)]
+        prior_pos_list = [np.random.uniform(-1, 1, size=(n_atoms, 3)) for _ in range(self.n_noise_mol)]
+        # prior_pos_list = [gt_pos for _ in range(self.n_noise_mol)]
         # encoder_pos_list = [gt_pos + np.random.uniform(*self.noise, size=(n_atoms, 3)) for _ in range(self.n_noise_mol)]
         encoder_pos_list = [gt_pos for _ in range(self.n_noise_mol)]
-        decoder_pos = gt_pos
+        decoder_pos = np.random.uniform(-1, 1, size=(n_atoms, 3))
         # decoder_pos = prior_pos_list
 
         smiles = Chem.MolToSmiles(mol)

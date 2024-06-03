@@ -80,8 +80,11 @@ def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bon
     return angle_dihedral_graph, masked_dihedral_angle
 
 
-def updated_graph(graph, feed_dict, now_positions, delta_positions, update_target, batch, num_nodes):
-    new_positions, _ = move2origin(now_positions + delta_positions, batch, num_nodes)
+def updated_graph(graph, feed_dict, now_positions, delta_positions, update_target, batch, num_nodes, move=True):
+    if move:
+        new_positions, _ = move2origin(now_positions + delta_positions, batch, num_nodes)
+    else:
+        new_positions = now_positions + delta_positions
 
     atom_bond_graph = graph['atom_bond_graph']
     bond_angel_graph = graph['bond_angle_graph']

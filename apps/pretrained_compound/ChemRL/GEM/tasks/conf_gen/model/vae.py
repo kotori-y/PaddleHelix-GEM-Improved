@@ -251,7 +251,8 @@ class VAE(nn.Layer):
                 delta_positions=0,
                 update_target=TARGET_MAPPING[i],
                 batch=decoder_batch['batch'],
-                num_nodes=decoder_batch['num_nodes']
+                num_nodes=decoder_batch['num_nodes'],
+                move=False
             )
 
         decoder_positions_list = self.decoder(decoder_graph, prior_feed, decoder_batch, latent)
