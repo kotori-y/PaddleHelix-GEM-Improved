@@ -210,145 +210,143 @@ def main(args):
         decoder_config['dropout_rate'] = args.dropout_rate
         # down_config['dropout_rate'] = args.dropout_rate
 
-    if not args.distributed or dist.get_rank() == 0:
+    done_file = os.path.join(args.cached_data_path, f"{args.dataset}.done")
 
-        done_file = os.path.join(args.cached_data_path, f"{args.dataset}.done")
+    if args.distributed or args.cached_data_path == "" or (args.cached_data_path != "" and not os.path.exists(done_file)):
 
-        if args.cached_data_path == "" or (args.cached_data_path != "" and not os.path.exists(done_file)):
+        print("===> Convert data...")
 
-            print("===> Convert data...")
+        train_dataset = load_mol_to_dataset(args.train_data_path, debug=args.debug)
+        valid_dataset = load_mol_to_dataset(args.valid_data_path, debug=args.debug)
 
-            train_dataset = load_mol_to_dataset(args.train_data_path, debug=args.debug)
-            valid_dataset = load_mol_to_dataset(args.valid_data_path, debug=args.debug)
+        if args.debug:
+            train_dataset = train_dataset[:32]
+            args.epochs = 10
+            args.dataset = 'debug'
+            valid_dataset = valid_dataset[:32]
+            args.num_workers = 1
+            args.cached_data_path = "./data/cached_data/debug"
 
-            if args.debug:
-                train_dataset = train_dataset[:32]
-                args.epochs = 10
-                args.dataset = 'debug'
-                valid_dataset = valid_dataset[:32]
-                args.num_workers = 1
-                args.cached_data_path = "./data/cached_data/debug"
+        print({
+            "train_num": len(train_dataset),
+            "valid_num": len(valid_dataset),
+        })
 
-            print({
-                "train_num": len(train_dataset),
-                "valid_num": len(valid_dataset),
-            })
-            train_dataset = train_dataset[dist.get_rank()::dist.get_world_size()]
-            print('Total size:%s' % (len(train_dataset)))
+        train_dataset = train_dataset[dist.get_rank()::dist.get_world_size()]
+        valid_dataset = valid_dataset[dist.get_rank()::dist.get_world_size()]
 
-            transform_fn = ConfGenTaskTransformFn(n_noise_mol=args.n_noise_mol, isomorphism=args.isomorphism)
+        transform_fn = ConfGenTaskTransformFn(n_noise_mol=args.n_noise_mol, isomorphism=args.isomorphism)
 
-            train_dataset.transform(transform_fn, num_workers=args.num_workers)
-            valid_dataset.transform(transform_fn, num_workers=args.num_workers)
+        train_dataset.transform(transform_fn, num_workers=args.num_workers)
+        valid_dataset.transform(transform_fn, num_workers=args.num_workers)
 
-            if args.cached_data_path and not args.debug:
+        if args.cached_data_path and not args.debug:
 
-                print("===> Save data ...")
+            print("===> Save data ...")
 
+            if not os.path.exists(args.cached_data_path):
+                os.makedirs(args.cached_data_path)
 
-                if not os.path.exists(args.cached_data_path):
-                    os.makedirs(args.cached_data_path)
+            with open(os.path.join(args.cached_data_path, 'train.npy'), 'wb') as w1:
+                pickle.dump(train_dataset, w1)
 
-                with open(os.path.join(args.cached_data_path, 'train.npy'), 'wb') as w1:
-                    pickle.dump(train_dataset, w1)
+            with open(os.path.join(args.cached_data_path, 'valid.npy'), 'wb') as w2:
+                pickle.dump(valid_dataset, w2)
 
-                with open(os.path.join(args.cached_data_path, 'valid.npy'), 'wb') as w2:
-                    pickle.dump(valid_dataset, w2)
+            with open(done_file, 'w') as w3:
+                w3.write("DONE!")
 
-                with open(done_file, 'w') as w3:
-                    w3.write("DONE!")
+    else:
+        print('====> Read preprocessing data...')
 
-        else:
-            print('====> Read preprocessing data...')
+        with open(os.path.join(args.cached_data_path, 'train.npy'), 'rb') as f1:
+            train_dataset = pickle.load(f1)
 
-            with open(os.path.join(args.cached_data_path, 'train.npy'), 'rb') as f1:
-                train_dataset = pickle.load(f1)
+        with open(os.path.join(args.cached_data_path, 'valid.npy'), 'rb') as f2:
+            valid_dataset = pickle.load(f2)
 
-            with open(os.path.join(args.cached_data_path, 'valid.npy'), 'rb') as f2:
-                valid_dataset = pickle.load(f2)
+    collate_fn = ConfGenTaskCollateFn(
+        atom_names=encoder_config['atom_names'],
+        bond_names=encoder_config['bond_names'],
+        bond_float_names=encoder_config['bond_float_names'],
+        bond_angle_float_names=encoder_config['bond_angle_float_names'],
+        dihedral_angle_float_names=encoder_config['dihedral_angle_float_names'],
+        isomorphism=args.isomorphism
+        # pretrain_tasks=head_config['pretrain_tasks']
+    )
 
-        collate_fn = ConfGenTaskCollateFn(
-            atom_names=encoder_config['atom_names'],
-            bond_names=encoder_config['bond_names'],
-            bond_float_names=encoder_config['bond_float_names'],
-            bond_angle_float_names=encoder_config['bond_angle_float_names'],
-            dihedral_angle_float_names=encoder_config['dihedral_angle_float_names'],
-            isomorphism=args.isomorphism
-            # pretrain_tasks=head_config['pretrain_tasks']
-        )
+    train_data_gen = train_dataset.get_data_loader(
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=True,
+        collate_fn=collate_fn
+    )
 
-        train_data_gen = train_dataset.get_data_loader(
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            shuffle=True,
-            collate_fn=collate_fn
-        )
+    valid_data_gen = valid_dataset.get_data_loader(
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=False,
+        collate_fn=collate_fn
+    )
 
-        valid_data_gen = valid_dataset.get_data_loader(
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            shuffle=False,
-            collate_fn=collate_fn
-        )
+    model = VAE(
+        prior_config=prior_config,
+        encoder_config=encoder_config,
+        decoder_config=decoder_config,
+        head_config=head_config,
+        n_layers=args.num_layers,
+        vae_beta=args.vae_beta
+    )
 
-        model = VAE(
-            prior_config=prior_config,
-            encoder_config=encoder_config,
-            decoder_config=decoder_config,
-            head_config=head_config,
-            n_layers=args.num_layers,
-            vae_beta=args.vae_beta
-        )
+    if not args.init_model is None and not args.init_model == "":
+        # compound_encoder.set_state_dict(paddle.load(args.init_model))
+        model.set_state_dict(paddle.load(args.init_model))
+        print('Load state_dict from %s' % args.init_model)
 
-        if not args.init_model is None and not args.init_model == "":
-            # compound_encoder.set_state_dict(paddle.load(args.init_model))
-            model.set_state_dict(paddle.load(args.init_model))
-            print('Load state_dict from %s' % args.init_model)
+    model_without_ddp = model
+    args.disable_tqdm = False
 
-        model_without_ddp = model
-        args.disable_tqdm = False
+    if args.distributed:
+        model = paddle.DataParallel(model, find_unused_parameters=True)
 
-        if args.distributed:
-            model = paddle.DataParallel(model, find_unused_parameters=True)
+    model_params = model_without_ddp.parameters()
+    optimizer = paddle.optimizer.Adam(
+        learning_rate=args.learning_rate,
+        parameters=model_params,
+        weight_decay=args.weight_decay
+    )
+    num_params = sum(p.numel() for p in model_params)
+    print(f"#Params: {num_params}")
 
-        model_params = model_without_ddp.parameters()
-        optimizer = paddle.optimizer.Adam(
-            learning_rate=args.learning_rate,
-            parameters=model_params,
-            weight_decay=args.weight_decay
-        )
-        num_params = sum(p.numel() for p in model_params)
-        print(f"#Params: {num_params}")
+    train_history = []
+    valid_history = []
 
-        train_history = []
-        valid_history = []
+    root = os.path.join(args.log_path, args.task)
+    if not os.path.exists(root):
+        os.makedirs(root)
 
-        root = os.path.join(args.log_path, args.task)
-        if not os.path.exists(root):
-            os.makedirs(root)
+    for epoch in range(args.epochs):
+        if not args.distributed or dist.get_rank() == 0:
+            print("\n=====Epoch {:0>3}".format(epoch))
+            print(f"Training at 0 / {dist.get_world_size()}...")
 
-        for epoch in range(args.epochs):
-            if not args.distributed or dist.get_rank() == 0:
-                print("\n=====Epoch {:0>3}".format(epoch))
-                print(f"Training at 0 / {dist.get_world_size()}...")
+        loss_dict_train = train(model, optimizer, train_data_gen, args)
+        train_history.append(loss_dict_train)
 
-            loss_dict_train = train(model, optimizer, train_data_gen, args)
-            train_history.append(loss_dict_train)
+        with open(os.path.join(root, f"./train_history_{dist.get_rank()}.pkl"), 'wb') as f:
+            pickle.dump(train_history, f)
 
-            with open(os.path.join(root, f"./train_history_{dist.get_rank()}.pkl"), 'wb') as f:
-                pickle.dump(train_history, f)
+        if not args.distributed or dist.get_rank() == 0:
+            print("Validating...")
+            loss_dict_valid, valid_rmsd = evaluate(model=model, data_gen=valid_data_gen, args=args)
+            loss_dict_valid['rmsd'] = valid_rmsd
 
-            if not args.distributed or dist.get_rank() == 0:
-                print("Validating...")
-                loss_dict_valid, valid_rmsd = evaluate(model=model, data_gen=valid_data_gen, args=args)
-                loss_dict_valid['rmsd'] = valid_rmsd
+            valid_history.append(loss_dict_valid)
+            with open(os.path.join(root, "./valid_history.pkl"), 'wb') as f:
+                pickle.dump(valid_history, f)
 
-                valid_history.append(loss_dict_valid)
-                with open(os.path.join(root, "./valid_history.pkl"), 'wb') as f:
-                    pickle.dump(valid_history, f)
-
-                print(f"====== epoch: {epoch:0>3} ======: \n train: {loss_dict_train['loss']} \n valid: {loss_dict_valid['loss']}")
-                paddle.save(model.state_dict(), os.path.join(root, 'params', f'iter_{epoch}', 'model.pdparams'))
+            print(f"====== epoch: {epoch:0>3} ======: \n train: {loss_dict_train['loss']} \n valid: {loss_dict_valid['loss']}")
+            paddle.save(model.state_dict(), os.path.join(root, 'params', f'iter_{epoch}', 'model.pdparams'))
 
 
 def main_cli():
