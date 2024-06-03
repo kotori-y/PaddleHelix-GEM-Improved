@@ -23,8 +23,6 @@ from pahelix.model_zoo.gem_model import GeoGNNModel, GNNModel
 
 from tqdm import tqdm
 
-from rdkit.Chem.rdForceFieldHelpers import MMFFOptimizeMolecule
-
 # from loss.e3_loss import compute_loss
 # # from model.gnn import ConfGenModel
 # from pahelix.utils import load_json_config
@@ -174,15 +172,14 @@ def evaluate(model: VAE, data_gen, args):
         for k, v in loss_dict.items():
             loss_accum_dict[k] += v
 
-        batch_size = len(prior_batch["num_nodes"])
+        # batch_size = len(prior_batch["num_nodes"])
         n_nodes = prior_batch["num_nodes"].tolist()
         pre_nodes = 0
 
-        for i in range(batch_size):
-            mol_labels.append(mol_list[i])
+        for i, mol in enumerate(mol_list):
+            mol_labels.append(mol)
 
-            mol_pred = set_rdmol_positions(mol_list[i], position[pre_nodes: pre_nodes + n_nodes[i]])
-            MMFFOptimizeMolecule(mol_pred)
+            mol_pred = set_rdmol_positions(mol, position[pre_nodes: pre_nodes + n_nodes[i]])
             mol_preds.append(mol_pred)
 
             pre_nodes += n_nodes[i]
@@ -244,9 +241,10 @@ def main(args):
             train_dataset.transform(transform_fn, num_workers=args.num_workers)
             valid_dataset.transform(transform_fn, num_workers=args.num_workers)
 
-            print("===> Save data ...")
+            if args.cached_data_path and not args.debug:
 
-            if args.cached_data_path:
+                print("===> Save data ...")
+
 
                 if not os.path.exists(args.cached_data_path):
                     os.makedirs(args.cached_data_path)
