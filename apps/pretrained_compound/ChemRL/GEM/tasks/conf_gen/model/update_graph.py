@@ -8,6 +8,8 @@ except:
     from conf_gen.model.utils import get_bond_length, get_bond_angle, get_dihedral_angle
     from conf_gen.utils import scatter_mean
 
+import copy
+
 
 def move2origin(poses, batch, num_nodes):
     dim_size = batch.max() + 1
@@ -19,33 +21,37 @@ def move2origin(poses, batch, num_nodes):
 
 
 def update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions):
+    new_atom_bond_graph = copy.deepcopy(atom_bond_graph)
 
     bond_length, masked_bond_length = get_bond_length(new_positions, feed_dict)
-    atom_bond_graph.edge_feat['bond_length'] = bond_length.squeeze()
 
-    atom_bond_graph.edge_feat['bond_length'] = atom_bond_graph.edge_feat['bond_length'].detach()
+    new_atom_bond_graph.edge_feat['bond_length'] = bond_length.squeeze()
+    new_atom_bond_graph.edge_feat['bond_length'] = new_atom_bond_graph.edge_feat['bond_length'].detach()
 
-    return atom_bond_graph, masked_bond_length
+    return new_atom_bond_graph, masked_bond_length
 
 
 def update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_positions):
+    new_bond_angel_graph = copy.deepcopy(bond_angel_graph)
 
     bond_angle, masked_bond_angle = get_bond_angle(new_positions, feed_dict)
 
-    angle_atoms = atom_bond_graph.edges.gather(bond_angel_graph.edges.flatten()).reshape((-1, 4))
+    angle_atoms = atom_bond_graph.edges.gather(new_bond_angel_graph.edges.flatten()).reshape((-1, 4))
     mask = (angle_atoms[:, 0] == angle_atoms[:, 1]) | \
            (angle_atoms[:, 0] == angle_atoms[:, -1]) | \
            (angle_atoms[:, 1] == angle_atoms[:, -1])
 
-    bond_angel_graph.edge_feat['bond_angle'][~mask] = bond_angle.squeeze()
-    bond_angel_graph.edge_feat['bond_angle'][mask] = 0
+    new_bond_angel_graph.edge_feat['bond_angle'][~mask] = bond_angle.squeeze()
+    new_bond_angel_graph.edge_feat['bond_angle'][mask] = 0
 
-    bond_angel_graph.edge_feat['bond_angle'] = bond_angel_graph.edge_feat['bond_angle'].detach()
+    new_bond_angel_graph.edge_feat['bond_angle'] = new_bond_angel_graph.edge_feat['bond_angle'].detach()
 
-    return bond_angel_graph, masked_bond_angle
+    return new_bond_angel_graph, masked_bond_angle
 
 
 def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bond_graph, feed_dict, new_positions):
+    new_angle_dihedral_graph = copy.deepcopy(angle_dihedral_graph)
+
     dihedral_angle, masked_dihedral_angle = get_dihedral_angle(new_positions, feed_dict)
 
     # ultra_edges为所有的组成二面角的键角
@@ -72,38 +78,40 @@ def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bon
 
     mask = mask_1 | mask_2 | mask_3
 
-    angle_dihedral_graph.edge_feat["dihedral_angle"][~mask] = dihedral_angle.squeeze()
-    angle_dihedral_graph.edge_feat["dihedral_angle"][mask] = 0
+    new_angle_dihedral_graph.edge_feat["dihedral_angle"][~mask] = dihedral_angle.squeeze()
+    new_angle_dihedral_graph.edge_feat["dihedral_angle"][mask] = 0
 
-    angle_dihedral_graph.edge_feat['dihedral_angle'] = angle_dihedral_graph.edge_feat['dihedral_angle'].detach()
+    new_angle_dihedral_graph.edge_feat['dihedral_angle'] = new_angle_dihedral_graph.edge_feat['dihedral_angle'].detach()
 
-    return angle_dihedral_graph, masked_dihedral_angle
+    return new_angle_dihedral_graph, masked_dihedral_angle
 
 
 def updated_graph(graph, feed_dict, now_positions, delta_positions, update_target, batch, num_nodes, move=True):
+    new_graph = copy.deepcopy(graph)
+
     if move:
         new_positions, _ = move2origin(now_positions + delta_positions, batch, num_nodes)
     else:
         new_positions = now_positions + delta_positions
 
-    atom_bond_graph = graph['atom_bond_graph']
-    bond_angel_graph = graph['bond_angle_graph']
-    angle_dihedral_graph = graph["angle_dihedral_graph"]
+    atom_bond_graph = new_graph['atom_bond_graph']
+    bond_angel_graph = new_graph['bond_angle_graph']
+    angle_dihedral_graph = new_graph["angle_dihedral_graph"]
     # new_positions, _ = move2origin(new_positions, batch, num_nodes)
 
     if update_target == "bond_length":
         new_atom_bond_graph, new_target_values = update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions)
 
-        graph['atom_bond_graph'] = new_atom_bond_graph
-        return graph, new_positions, new_target_values
+        new_graph['atom_bond_graph'] = new_atom_bond_graph
+        return new_graph, new_positions, new_target_values
 
     if update_target == "bond_angle":
         new_atom_bond_graph, _ = update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions)
         new_bond_angel_graph, new_target_values = update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_positions)
 
-        graph['atom_bond_graph'] = new_atom_bond_graph
-        graph['bond_angle_graph'] = new_bond_angel_graph
-        return graph, new_positions, new_target_values
+        new_graph['atom_bond_graph'] = new_atom_bond_graph
+        new_graph['bond_angle_graph'] = new_bond_angel_graph
+        return new_graph, new_positions, new_target_values
 
     if update_target == "dihedral_angle":
         # new_atom_bond_graph, _ = update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions)
@@ -116,5 +124,5 @@ def updated_graph(graph, feed_dict, now_positions, delta_positions, update_targe
             new_positions
         )
 
-        graph["angle_dihedral_graph"] = new_angle_dihedral_graph
-        return graph, new_positions, new_target_values
+        new_graph["angle_dihedral_graph"] = new_angle_dihedral_graph
+        return new_graph, new_positions, new_target_values
