@@ -94,85 +94,73 @@ def evaluate(model: VAE, data_gen, args):
         }
 
         with paddle.no_grad():
-            positions_list = model(**net_inputs, sample=True, compute_loss=False)
+            prior_positions_list, positions_list = model(**net_inputs, sample=True, compute_loss=False)
 
-            pred_position = positions_list[-1]
             num_nodes = prior_batch["num_nodes"]
             pre_nodes = 0
 
             for i, mol in enumerate(mol_list):
                 inchikey = Chem.MolToInchiKey(mol)
 
-                inchikey2pairs[inchikey][1].append(mol)
-
-                gen_mol = set_rdmol_positions(mol, pred_position[pre_nodes: pre_nodes + num_nodes[i]])
-
-                # mol_labels.append(mol)
-                # mol_preds.append(gen_mol)
                 if inchikey not in inchikey2pairs:
-                    inchikey2pairs[inchikey] = [[], []]
+                    n = len(prior_positions_list + positions_list) + 1
+                    inchikey2pairs[inchikey] = [[] for _ in range(n)]
 
-                inchikey2pairs[inchikey][0].append(gen_mol)
+                inchikey2pairs[inchikey][-1].append(mol)
+
+                for j, pos in enumerate(prior_positions_list + positions_list):
+                    tmp_mol = set_rdmol_positions(mol, pos[pre_nodes: pre_nodes + num_nodes[i]])
+                    inchikey2pairs[inchikey][j].append(tmp_mol)
 
                 pre_nodes += num_nodes[i]
 
         with paddle.no_grad():
-            positions_list = model(**net_inputs, sample=True, compute_loss=False)
+            prior_positions_list, positions_list = model(**net_inputs, sample=True, compute_loss=False)
 
-            pred_position = positions_list[-1]
             num_nodes = prior_batch["num_nodes"]
             pre_nodes = 0
 
             for i, mol in enumerate(mol_list):
                 inchikey = Chem.MolToInchiKey(mol)
 
-                gen_mol = set_rdmol_positions(mol, pred_position[pre_nodes: pre_nodes + num_nodes[i]])
-                # mol_preds.append(gen_mol)
+                for j, pos in enumerate(prior_positions_list + positions_list):
+                    tmp_mol = set_rdmol_positions(mol, pos[pre_nodes: pre_nodes + num_nodes[i]])
+                    inchikey2pairs[inchikey][j].append(tmp_mol)
 
-                inchikey2pairs[inchikey][0].append(gen_mol)
                 pre_nodes += num_nodes[i]
-
-    # for gen_mol in mol_preds:
-    #     # smiles = Chem.MolToSmiles(gen_mol)
-    #     inchikey = Chem.MolToInchiKey(gen_mol)
-    #     if inchikey not in inchikey2pairs:
-    #         inchikey2pairs[inchikey] = [[gen_mol]]
-    #     else:
-    #         inchikey2pairs[inchikey][0].append(gen_mol)
-    #
-    # for ref_mol in mol_labels:
-    #     inchikey = Chem.MolToInchiKey(ref_mol)
-    #     if len(inchikey2pairs[inchikey]) == 1:
-    #         inchikey2pairs[inchikey].append([ref_mol])
-    #     else:
-    #         inchikey2pairs[inchikey][1].append(ref_mol)
 
     if not args.debug:
         del_inchikey = []
         for inchikey in inchikey2pairs.keys():
-            if len(inchikey2pairs[inchikey][1]) < 50 or len(inchikey2pairs[inchikey][1]) > 500:
+            if len(inchikey2pairs[inchikey][-1]) < 50 or len(inchikey2pairs[inchikey][-1]) > 500:
                 del_inchikey.append(inchikey)
         for inchikey in del_inchikey:
             del inchikey2pairs[inchikey]
-            ...
-        # ...
 
     cov_list = []
     mat_list = []
-    # pool = multiprocessing.Pool(16)
 
     def input_args():
         for _inchikey in inchikey2pairs.keys():
             yield inchikey2pairs[_inchikey], args.use_ff, 0.5 if args.dataset_name == "qm9" else 1.25
 
-    for inputargs in input_args():
-        res = get_rmsd_min(inputargs)
-        cov_list.append(res[0])
-        mat_list.append(res[1])
+    history = [[] for _ in range(2 * args.num_layers + 2)]
+
+    for mols, use_ff, threshold in input_args():
+        cov, mat, min_index = get_rmsd_min(mols[-2:], use_ff, threshold)
+
+        cov_list.append(cov)
+        mat_list.append(mat)
+
+        for i, _mol_list in enumerate(mols[:-1]):
+            history[i] += np.array(mols[i])[list(min_index)].tolist()
+        else:
+            history[-1] += mols[-1]
 
     print(f"cov mean {np.mean(cov_list)} med {np.median(cov_list)}")
     print(f"mat mean {np.mean(mat_list)} med {np.median(mat_list)}")
-    return np.mean(cov_list), np.mean(mat_list)
+
+    return np.mean(cov_list), np.mean(mat_list), history
 
 
 def main(args):
@@ -247,7 +235,19 @@ def main(args):
         print('Load state_dict from %s' % args.init_model)
 
     print("Evaluating...")
-    evaluate(model, test_data_gen, args)
+    _, _, history = evaluate(model, test_data_gen, args)
+
+    if args.save_conf_dir:
+        for i, history_mols in enumerate(history):
+            if i != len(history) - 1:
+                writer = Chem.SDWriter(f'{args.save_conf_dir}/{args.dataset_name}_step_{i}.sdf')
+            else:
+                writer = Chem.SDWriter(f'{args.save_conf_dir}/{args.dataset_name}_ref.sdf')
+
+            for mol in history_mols:
+                writer.write(mol)
+
+            writer.close()
 
 
 def main_cli():
@@ -271,6 +271,7 @@ def main_cli():
     parser.add_argument("--debug", action="store_true", default=False)
 
     parser.add_argument("--cached_data_path", type=str, default='')
+    parser.add_argument("--save_conf_dir", type=str, default='')
 
     args = parser.parse_args()
     args.use_ff = False

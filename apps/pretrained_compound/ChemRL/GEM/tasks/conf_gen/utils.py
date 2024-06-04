@@ -61,8 +61,7 @@ def get_best_rmsd(gen_mol, ref_mol):
     return rmsd
 
 
-def get_rmsd_min(inputargs):
-    mols, use_ff, threshold = inputargs
+def get_rmsd_min(mols, use_ff, threshold):
     gen_mols, ref_mols = mols
     rmsd_mat = np.zeros([len(ref_mols), len(gen_mols)], dtype=np.float32)
     for i, gen_mol in enumerate(gen_mols):
@@ -72,8 +71,14 @@ def get_rmsd_min(inputargs):
         for j, ref_mol in enumerate(ref_mols):
             ref_mol_c = copy.deepcopy(ref_mol)
             rmsd_mat[j, i] = get_best_rmsd(gen_mol_c, ref_mol_c)
+
     rmsd_mat_min = rmsd_mat.min(-1)
-    return (rmsd_mat_min <= threshold).mean(), rmsd_mat_min.mean()
+    rmsd_mat_min_index = rmsd_mat.argmin(axis=1)
+
+    cov = (rmsd_mat_min <= threshold).mean()
+    mat = rmsd_mat_min.mean()
+
+    return cov, mat, rmsd_mat_min_index
 
 
 def scatter_sum(src, index, dim, dim_size):

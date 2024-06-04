@@ -89,7 +89,7 @@ def train(model: VAE, opt, data_gen, args):
             "encoder_batch": encoder_batch,
         }
 
-        loss, loss_dict, _ = model(**net_inputs)
+        loss, loss_dict, _, _ = model(**net_inputs)
 
         loss.backward()
         opt.step()
@@ -166,7 +166,7 @@ def evaluate(model: VAE, data_gen, args):
         }
 
         with paddle.no_grad():
-            _, loss_dict, positions_list = model(**net_inputs)
+            _, loss_dict, _, positions_list = model(**net_inputs)
 
         position = positions_list[-1]
         for k, v in loss_dict.items():

@@ -36,13 +36,13 @@ class ConfPrior(nn.Layer):
         )
 
     def forward(self, prior_graph, prior_feed, prior_batch):
-        # prior_positions_list = []
 
         prior_bond_length_list = []
         prior_bond_angle_list = []
         prior_dihedral_angle_list = []
 
         new_positions = prior_batch["positions"]
+        prior_positions_list = [new_positions]
 
         for i, layer in enumerate(self.layers):
             delta_positions = layer(prior_graph)
@@ -59,7 +59,7 @@ class ConfPrior(nn.Layer):
                 num_nodes=prior_batch['num_nodes']
             )
 
-            # prior_positions_list.append(new_positions)
+            prior_positions_list.append(new_positions)
 
             if flag == 0:
                 prior_bond_length_list.append(new_target_values)
@@ -68,7 +68,7 @@ class ConfPrior(nn.Layer):
             else:
                 prior_dihedral_angle_list.append(new_target_values)
 
-        return new_positions, prior_bond_length_list, prior_bond_angle_list, prior_dihedral_angle_list
+        return prior_positions_list, prior_bond_length_list, prior_bond_angle_list, prior_dihedral_angle_list
         # return prior_positions_list
 
 
@@ -221,7 +221,7 @@ class VAE(nn.Layer):
 
         # prior
         # prior_positions_list = self.prior(prior_graph, prior_feed, prior_batch)
-        prior_position_last, prior_bond_length_list, prior_bond_angle_list, prior_dihedral_angle_list = self.prior(
+        prior_positions_list, prior_bond_length_list, prior_bond_angle_list, prior_dihedral_angle_list = self.prior(
             prior_graph, prior_feed, prior_batch
         )
 
@@ -247,7 +247,7 @@ class VAE(nn.Layer):
             decoder_graph, _, _, = updated_graph(
                 graph=decoder_graph,
                 feed_dict=prior_feed,
-                now_positions=prior_position_last,
+                now_positions=prior_positions_list[-1],
                 delta_positions=0,
                 update_target=TARGET_MAPPING[i],
                 batch=decoder_batch['batch'],
@@ -264,9 +264,9 @@ class VAE(nn.Layer):
 
         if compute_loss:
             loss, loss_dict = self.compute_loss(decoder_positions_list, encoder_batch, extra_output)
-            return loss, loss_dict, decoder_positions_list
+            return loss, loss_dict, prior_positions_list, decoder_positions_list
 
-        return decoder_positions_list
+        return prior_positions_list, decoder_positions_list
 
     def compute_loss(self, decoder_positions_list, encoder_batch, extra_output):
         # kld loss
