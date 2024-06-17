@@ -429,14 +429,14 @@ class ConfGenTaskCollateFn:
                 "isomorphism": np.hstack(isomorphism),
                 "isomorphism_num": np.array(isomorphism_num)
             }
-            return graph_dict, feed_dict, batch, np.array(masked_nodes)
+            return graph_dict, feed_dict, batch, masked_nodes
 
         batch = {
             "batch": batch_list,
             "num_nodes": num_nodes,
             "positions": pos_list
         }
-        return graph_dict, feed_dict, batch, np.array(masked_nodes)
+        return graph_dict, feed_dict, batch, masked_nodes
 
     def __call__(self, batch_data_list):
         prior_data_list = [x[0] for x in batch_data_list]
