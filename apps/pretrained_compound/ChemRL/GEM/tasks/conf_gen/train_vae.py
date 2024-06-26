@@ -295,7 +295,8 @@ def main(args):
         decoder_config=decoder_config,
         head_config=head_config,
         n_layers=args.num_layers,
-        vae_beta=args.vae_beta
+        vae_beta=args.vae_beta,
+        isomorphism=args.isomorphism
     )
 
     if not args.init_model is None and not args.init_model == "":

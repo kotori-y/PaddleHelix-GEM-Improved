@@ -177,6 +177,7 @@ def alignment_loss(pos_y, pos_x, batch, clamp=None):
         t = paddle.to_tensor(np.repeat(t.numpy(), batch["num_nodes"], axis=0))
 
     pos_x = paddle.einsum("kj,kij->ki", pos_x, rotation) + t
+
     if clamp is None:
         loss = move2origin((pos_y - pos_x).norm(axis=-1, keepdim=True), batch["batch"], num_nodes)[1].mean()
     else:

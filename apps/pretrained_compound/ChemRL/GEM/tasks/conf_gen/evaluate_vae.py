@@ -274,7 +274,7 @@ def main_cli():
     parser.add_argument("--save_conf_dir", type=str, default='')
 
     args = parser.parse_args()
-    args.use_ff = False
+    args.use_ff = True
     print(args)
 
     main(args)

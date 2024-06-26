@@ -28,7 +28,7 @@ def update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions):
     new_atom_bond_graph.edge_feat['bond_length'] = bond_length.squeeze()
     new_atom_bond_graph.edge_feat['bond_length'] = new_atom_bond_graph.edge_feat['bond_length'].detach()
 
-    return new_atom_bond_graph, masked_bond_length
+    return new_atom_bond_graph, masked_bond_length, bond_length
 
 
 def update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_positions):
@@ -46,7 +46,7 @@ def update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_po
 
     new_bond_angel_graph.edge_feat['bond_angle'] = new_bond_angel_graph.edge_feat['bond_angle'].detach()
 
-    return new_bond_angel_graph, masked_bond_angle
+    return new_bond_angel_graph, masked_bond_angle, bond_angle
 
 
 def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bond_graph, feed_dict, new_positions):
@@ -83,7 +83,7 @@ def update_angle_dihedral_graph(angle_dihedral_graph, bond_angel_graph, atom_bon
 
     new_angle_dihedral_graph.edge_feat['dihedral_angle'] = new_angle_dihedral_graph.edge_feat['dihedral_angle'].detach()
 
-    return new_angle_dihedral_graph, masked_dihedral_angle
+    return new_angle_dihedral_graph, masked_dihedral_angle, dihedral_angle
 
 
 def updated_graph(graph, feed_dict, now_positions, delta_positions, update_target, batch, num_nodes, move=True):
@@ -100,23 +100,45 @@ def updated_graph(graph, feed_dict, now_positions, delta_positions, update_targe
     # new_positions, _ = move2origin(new_positions, batch, num_nodes)
 
     if update_target == "bond_length":
-        new_atom_bond_graph, new_target_values = update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions)
+        new_atom_bond_graph, masked_bond_length, bond_length = update_atom_bond_graph(
+            atom_bond_graph,
+            feed_dict,
+            new_positions
+        )
 
         new_graph['atom_bond_graph'] = new_atom_bond_graph
-        return new_graph, new_positions, new_target_values
+        return new_graph, new_positions, masked_bond_length, [bond_length]
 
     if update_target == "bond_angle":
-        new_atom_bond_graph, _ = update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions)
-        new_bond_angel_graph, new_target_values = update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_positions)
+        new_atom_bond_graph, _, bond_length = update_atom_bond_graph(
+            atom_bond_graph,
+            feed_dict,
+            new_positions
+        )
+        new_bond_angel_graph, masked_bond_angle, bond_angle = update_bond_angel_graph(
+            bond_angel_graph,
+            atom_bond_graph,
+            feed_dict,
+            new_positions
+        )
 
         new_graph['atom_bond_graph'] = new_atom_bond_graph
         new_graph['bond_angle_graph'] = new_bond_angel_graph
-        return new_graph, new_positions, new_target_values
+        return new_graph, new_positions, masked_bond_angle, [bond_length, bond_angle]
 
     if update_target == "dihedral_angle":
-        # new_atom_bond_graph, _ = update_atom_bond_graph(atom_bond_graph, feed_dict, new_positions)
-        # new_bond_angel_graph, _ = update_bond_angel_graph(bond_angel_graph, atom_bond_graph, feed_dict, new_positions)
-        new_angle_dihedral_graph, new_target_values = update_angle_dihedral_graph(
+        new_atom_bond_graph, _, bond_length = update_atom_bond_graph(
+            atom_bond_graph,
+            feed_dict,
+            new_positions
+        )
+        new_bond_angel_graph, _, bond_angle = update_bond_angel_graph(
+            bond_angel_graph,
+            atom_bond_graph,
+            feed_dict,
+            new_positions
+        )
+        new_angle_dihedral_graph, masked_dihedral_angle, _ = update_angle_dihedral_graph(
             angle_dihedral_graph,
             bond_angel_graph,
             atom_bond_graph,
@@ -124,5 +146,7 @@ def updated_graph(graph, feed_dict, now_positions, delta_positions, update_targe
             new_positions
         )
 
+        new_graph['atom_bond_graph'] = new_atom_bond_graph
+        new_graph['bond_angle_graph'] = new_bond_angel_graph
         new_graph["angle_dihedral_graph"] = new_angle_dihedral_graph
-        return new_graph, new_positions, new_target_values
+        return new_graph, new_positions, masked_dihedral_angle, [bond_length, bond_angle]
