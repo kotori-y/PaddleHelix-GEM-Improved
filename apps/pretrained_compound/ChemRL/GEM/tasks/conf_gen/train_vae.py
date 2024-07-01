@@ -11,6 +11,7 @@ from paddle.optimizer.lr import LambdaDecay
 
 import sys
 
+from apps.pretrained_compound.ChemRL.GEM.src.utils import exempt_parameters
 from apps.pretrained_compound.ChemRL.GEM.tasks.conf_gen.utils import set_rdmol_positions, get_best_rmsd
 from pahelix.datasets import InMemoryDataset
 
@@ -89,7 +90,7 @@ def train(model: VAE, opt, data_gen, args):
             "encoder_batch": encoder_batch,
         }
 
-        loss, loss_dict, _, _ = model(**net_inputs)
+        loss, loss_dict, _ = model(**net_inputs)
 
         loss.backward()
         opt.step()
@@ -166,7 +167,7 @@ def evaluate(model: VAE, data_gen, args):
         }
 
         with paddle.no_grad():
-            _, loss_dict, _, positions_list = model(**net_inputs)
+            _, loss_dict, positions_list = model(**net_inputs)
 
         position = positions_list[-1]
         for k, v in loss_dict.items():
@@ -289,6 +290,11 @@ def main(args):
         collate_fn=collate_fn
     )
 
+    compound_encoder = GeoGNNModel(prior_config)
+    if not args.init_model is None and not args.init_model == "":
+        compound_encoder.set_state_dict(paddle.load(args.init_model))
+        print('Load state_dict from %s' % args.init_model)
+
     model = VAE(
         prior_config=prior_config,
         encoder_config=encoder_config,
@@ -296,13 +302,9 @@ def main(args):
         head_config=head_config,
         n_layers=args.num_layers,
         vae_beta=args.vae_beta,
-        isomorphism=args.isomorphism
+        isomorphism=args.isomorphism,
+        compound_encoder=compound_encoder
     )
-
-    if not args.init_model is None and not args.init_model == "":
-        # compound_encoder.set_state_dict(paddle.load(args.init_model))
-        model.set_state_dict(paddle.load(args.init_model))
-        print('Load state_dict from %s' % args.init_model)
 
     model_without_ddp = model
     args.disable_tqdm = False
@@ -311,12 +313,14 @@ def main(args):
         model = paddle.DataParallel(model, find_unused_parameters=True)
 
     model_params = model_without_ddp.parameters()
+    head_params = exempt_parameters(model_params, compound_encoder.parameters())
+
     optimizer = paddle.optimizer.Adam(
         learning_rate=args.learning_rate,
-        parameters=model_params,
+        parameters=head_params,
         weight_decay=args.weight_decay
     )
-    num_params = sum(p.numel() for p in model_params)
+    num_params = sum(p.numel() for p in head_params)
     print(f"#Params: {num_params}")
 
     train_history = []
@@ -369,26 +373,19 @@ def main_cli():
     parser.add_argument("--encoder_config", type=str)
     parser.add_argument("--decoder_config", type=str)
     parser.add_argument("--head_config", type=str)
-    # parser.add_argument("--aux_config", type=str)
 
-    parser.add_argument("--init_model", type=str, default=None)
-
-    # parser.add_argument("--encoder_lr", type=float, default=0.001)
-    # parser.add_argument("--period", type=float, default=10)
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
 
     parser.add_argument("--n_noise_mol", type=int, default=1)
-
     parser.add_argument("--vae_beta", type=float, default=1.0)
-
-    # parser.add_argument("--recycle", type=int, default=1)
-    # parser.add_argument("--num_message_passing_steps", type=int, default=3)
 
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--distributed", action="store_true", default=False)
     parser.add_argument("--isomorphism", action="store_true", default=False)
+
+    parser.add_argument("--init_model", type=str, default='')
 
     parser.add_argument("--cached_data_path", type=str, default='')
 
