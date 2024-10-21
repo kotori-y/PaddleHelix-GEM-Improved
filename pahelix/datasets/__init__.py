@@ -43,4 +43,6 @@ from pahelix.datasets.boilingpoint_dataset import *
 from pahelix.datasets.pka_dataset import *
 from pahelix.datasets.logpow_dataset import *
 from pahelix.datasets.solubility_dataset import *
+from pahelix.datasets.special_pc_dataset import *
+from pahelix.datasets.localprop_dataset import *
  #  'logpow', 'solubility', 'boilingpoint', 'pka'
