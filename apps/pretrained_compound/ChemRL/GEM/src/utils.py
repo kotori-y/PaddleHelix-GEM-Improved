@@ -86,7 +86,9 @@ def get_downstream_task_names(dataset_name, data_path):
         return get_default_boilingpoint_task_names()
     elif dataset_name == 'pka':
         return get_default_pka_task_names()
-    elif dataset_name == 'diy':
+    elif dataset_name == 'special_pc':
+        return get_default_special_pc_task_names()
+    elif 'sp' in dataset_name:
         return get_default_diy_task_names()
     else:
         raise ValueError('%s not supported' % dataset_name)
@@ -94,7 +96,7 @@ def get_downstream_task_names(dataset_name, data_path):
     return task_name
 
 
-def get_dataset(dataset_name, data_path, task_names):
+def get_dataset(dataset_name, data_path, task_names, debug=False):
     """Return dataset according to the ``dataset_name``"""
     if dataset_name == 'bace':
         dataset = load_bace_dataset(data_path, task_names)
@@ -136,8 +138,12 @@ def get_dataset(dataset_name, data_path, task_names):
         return load_boilingpoint_dataset(data_path, task_names)
     elif dataset_name == 'pka':
         return load_pka_dataset(data_path, task_names)
-    elif dataset_name == 'diy':
-        dataset = load_diy_dataset(data_path, task_names)
+    elif dataset_name == 'special_pc':
+        return load_special_pc_dataset(data_path, task_names)
+    elif 'sp' in dataset_name:
+        return load_diy_dataset(data_path, task_names)
+    elif dataset_name in ['cm5', 'espc', 'hirshfeld', 'npa', 'wiberg']:
+        return load_localprop_dataset(data_path, task_names, debug=debug)
     else:
         raise ValueError('%s not supported' % dataset_name)
 
@@ -170,7 +176,9 @@ def get_dataset_stat(dataset_name, data_path, task_names):
         return get_boilingpoint_stat(data_path, task_names)
     elif dataset_name == 'pka':
         return get_pka_stat(data_path, task_names)
-    elif dataset_name == 'diy':
+    elif dataset_name == 'special_pc':
+        return get_special_pc_stat(data_path, task_names)
+    elif 'sp' in dataset_name:
         return get_diy_stat(data_path, task_names)
     else:
         raise ValueError(dataset_name)
@@ -213,14 +221,29 @@ def calc_rocauc_score(labels, preds, valid):
     return sum(rocauc_list)/len(rocauc_list)
 
 
+def process_nan_value(pred, label, criterion):
+    nan_mask = np.isnan(label)
+
+    label = np.where(nan_mask, np.zeros_like(label), label)
+    loss = criterion(pred, label)
+
+    loss = np.where(nan_mask, np.zeros_like(loss), loss)
+
+    return loss.sum() / (~nan_mask).sum()
+
+
 def calc_rmse(labels, preds):
-    """tbd"""
-    return np.sqrt(np.mean((preds - labels) ** 2))
+    def _calc_rmse(labels, preds):
+        return np.sqrt(np.mean((preds - labels) ** 2))
+
+    return process_nan_value(preds, labels, _calc_rmse)
 
 
 def calc_mae(labels, preds):
-    """tbd"""
-    return np.mean(np.abs(preds - labels))
+    def _calc_mae(labels, preds):
+        return np.mean(np.abs(preds - labels))
+
+    return process_nan_value(preds, labels, _calc_mae)
 
 
 def exempt_parameters(src_list, ref_list):
