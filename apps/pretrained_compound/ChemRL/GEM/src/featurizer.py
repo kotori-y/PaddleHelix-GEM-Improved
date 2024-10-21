@@ -42,15 +42,15 @@ class DownstreamTransformFn(object):
             data: It contains reshape label and smiles.
         """
         if self.with_provided_3d:
-            mol = raw_data
+            mol = raw_data["mol"]
             if mol is None:
                 return None
-            smiles = Chem.MolToSmiles(mol)
+            smiles = raw_data["smiles"]
             print('smiles', smiles)
-            if self.shuffle_coord:
-                print('shuffle!')
-            data = mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=self.shuffle_coord)
+            data = mol_to_geognn_graph_data_raw3d(mol, shuffle_coord=False)
             data['smiles'] = smiles
+            if not self.is_inference:
+                data['label'] = raw_data['label'].reshape([-1])
             return data
 
         smiles = raw_data['smiles']
@@ -67,14 +67,16 @@ class DownstreamTransformFn(object):
 
 class DownstreamCollateFn(object):
     """CollateFn for downstream model"""
-    def __init__(self, 
-            atom_names, 
-            bond_names, 
-            bond_float_names,
-            bond_angle_float_names,
-            dihedral_angle_float_names,
-            task_type,
-            is_inference=False):
+    def __init__(
+        self,
+        atom_names,
+        bond_names,
+        bond_float_names,
+        bond_angle_float_names,
+        dihedral_angle_float_names,
+        task_type,
+        is_inference=False
+    ):
         self.atom_names = atom_names
         self.bond_names = bond_names
         self.bond_float_names = bond_float_names
